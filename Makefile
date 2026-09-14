@@ -1,18 +1,25 @@
 # Find all tex files one directory down
 TEX=$(shell find . -path "./.git*" -prune -o -type f -iname "*.tex" -print)
+# The PDFs (main book, chapter PDFs, debug) are tagged for accessibility
+# by default (issue #238, Part B): main_tagged.tex puts \DocumentMetadata
+# in front of main_wrapper.tex. `make pdf TAGGED=0` builds the same book
+# untagged, straight from main_wrapper.tex, which is quicker and easier to
+# debug; it needs the same TeX Live as the tagged build (2026, see
+# .github/workflows/build.yaml), because cs341code.sty and cs341book.sty
+# assume a current LaTeX.
+TAGGED ?= 1
+ifeq ($(TAGGED),0)
 MAIN_TEX=main_wrapper.tex
-# `make pdf TAGGED=1` (also chapters, debug) builds a tagged PDF through
-# main_tagged.tex, which prepends \DocumentMetadata. Experimental, see
-# docs/pdf-tagging-spike.md. Without TAGGED nothing below changes. Tagged
-# builds always rerun (FORCE), and their PDFs are backdated to 1970 so a
-# later plain `make` rebuilds them rather than keeping a tagged PDF as
-# up to date; either way round, switching modes never reuses the other
-# mode's PDF.
-ifeq ($(TAGGED),1)
+else
 MAIN_TEX=main_tagged.tex
-TAGGED_FORCE=FORCE
-TAGGED_BACKDATE=touch -t 197001010000
 endif
+# The PDFs depend on this stamp, which changes only when TAGGED does, so
+# switching modes rebuilds them instead of keeping the other mode's PDF.
+PDF_MODE=.pdf-mode
+$(shell echo "$(TAGGED)" | cmp -s - $(PDF_MODE) || echo "$(TAGGED)" > $(PDF_MODE))
+# Every PDF, the chapter PDFs included, also depends on the preamble.
+PREAMBLE=main.tex main_wrapper.tex main_tagged.tex prelude.tex title.tex glossary.tex \
+	cs341code.sty cs341book.sty $(PDF_MODE)
 MAIN_TEX_SOURCE=main.tex
 PDF_TEX=$(patsubst %.tex,%.pdf,$(MAIN_TEX))
 MAIN_OUT=main.pdf
@@ -24,6 +31,7 @@ OTHER=$$(find . -iname *aux) $$(find . -iname *bbl) $$(find . -iname *blg)
 ORDER_TEX=order.tex
 ORDER_TEX_DEP=order.yaml
 
+# order.yaml has CRLF line ends; $(shell) turns CRLF into a space, like LF.
 TEX_ORDER=$(shell sh -c "cat order.yaml | sed 's/^- //'")
 CHAPTER_PDF=$(patsubst %,%.pdf,$(TEX_ORDER))
 
@@ -40,7 +48,7 @@ pdf: $(MAIN_OUT) chapters
 chapters: $(CHAPTER_PDF)
 
 .PHONY: debug
-debug: $(PDF_TEX)-debug
+debug: $(MAIN_OUT)-debug
 
 .PHONY: epub
 epub: $(MAIN_EPUB)
@@ -62,35 +70,32 @@ $(ORDER_TEX): $(ORDER_TEX_DEP)
 # order.tex is generated, and main.tex \input's it, so a chapter build from
 # a clean tree needs it too. Note $< rather than $^: the recipe wants only
 # the chapter's own .tex here, not every prerequisite.
-$(CHAPTER_PDF): %.pdf: %.tex $(ORDER_TEX) $(TAGGED_FORCE)
+$(CHAPTER_PDF): %.pdf: %.tex $(ORDER_TEX) $(PREAMBLE)
 	echo '\\let\\cleardoublepage\\clearpage' > $@.tmp
 	echo "\includeonly{$(basename $<)}\input{$(MAIN_TEX)}" >> $@.tmp
 	@latexmk -interaction=nonstopmode -quiet -pdflatex=lualatex -pdf -jobname="$@" $@.tmp \
 		|| { echo "*** latexmk failed for $@"; grep -n -A3 '^! ' $@.log 2>/dev/null; rm -f $@.tmp; false; }
 	@mv $@.pdf $@
-	$(if $(TAGGED_BACKDATE),@$(TAGGED_BACKDATE) $@)
 	@ls $@ > /dev/null
 	-@rm $@.tmp
 
-$(MAIN_OUT): $(TEX) $(MAIN_TEX) $(BIBS) Makefile $(ORDER_TEX) $(TAGGED_FORCE)
+$(MAIN_OUT): $(TEX) $(PREAMBLE) $(BIBS) Makefile $(ORDER_TEX)
 	@latexmk -quiet -pdflatex=lualatex -interaction=nonstopmode -pdf $(MAIN_TEX) \
 		|| { echo "*** latexmk failed"; grep -n -A3 '^! ' $(basename $(MAIN_TEX)).log 2>/dev/null; false; }
 	@ls $(PDF_TEX) > /dev/null
 	@mv $(PDF_TEX) $(MAIN_OUT)
-	$(if $(TAGGED_BACKDATE),@$(TAGGED_BACKDATE) $(MAIN_OUT))
 	@echo "Finished"
 
-$(PDF_TEX)-debug: $(TEX) $(MAIN_TEX) $(BIBS) Makefile $(TAGGED_FORCE)
-	-@latexmk -interaction=nonstopmode -f -pdf $(MAIN_TEX) > latexmk.out
-	@mv $(PDF_TEX)-debug $(MAIN_OUT)
-	$(if $(TAGGED_BACKDATE),@$(TAGGED_BACKDATE) $(MAIN_OUT))
-
-.PHONY: FORCE
-FORCE:
+# Like $(MAIN_OUT), but carries on past TeX errors (latexmk -f) and keeps
+# its output in latexmk.out, to see how far a broken build gets. Same
+# engine as the real build.
+$(MAIN_OUT)-debug: $(TEX) $(PREAMBLE) $(BIBS) Makefile $(ORDER_TEX)
+	-@latexmk -pdflatex=lualatex -interaction=nonstopmode -f -pdf $(MAIN_TEX) > latexmk.out
+	@test -f $(PDF_TEX) && mv $(PDF_TEX) $(MAIN_OUT) || { echo "*** no PDF; see latexmk.out"; false; }
 
 .PHONY: clean
 clean:
-	-@rm $(PDF_TEX) $(OTHER_FILES) $(OTHER)
+	-@rm $(PDF_TEX) $(OTHER_FILES) $(OTHER) $(PDF_MODE)
 
 
 

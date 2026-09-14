@@ -232,3 +232,6 @@ order.tex
 # Don't ask about it
 -B
 
+
+## PDF build mode stamp (Makefile: TAGGED)
+.pdf-mode

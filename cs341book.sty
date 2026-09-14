@@ -142,6 +142,19 @@
 \fi
 
 % ---------------------------------------------------------------------
+% \tightlist (pandoc's idiom; prelude.tex \providecommand's it and 36 lists
+% use it) zeroes \itemsep and \parskip after the list has begun. The
+% kernel's list (untagged) has already set the space above the first item
+% by then, but latex-lab's list (tagged) still uses \parskip for it, so
+% each such list started 4pt higher in the tagged build: two pages over the
+% book (B4a). Zero \parskip only once the first item has begun, so both
+% builds keep the space above the first item, as the book always had. This
+% definition comes first, so prelude.tex's \providecommand does nothing
+% here, and pandoc (which never reads this file) keeps prelude.tex's.
+\newcommand\tightlist{\setlength\itemsep{0pt}%
+  \AddToHookNext{para/begin}{\setlength\parskip{0pt}}}
+
+% ---------------------------------------------------------------------
 % Section heads: the sizes and spacing main.tex used to set with titlesec
 % (\titleformat*, \titlespacing*), as plain \@startsection calls, which
 % latex-lab tags as /H2../H6. A negative space above means the paragraph

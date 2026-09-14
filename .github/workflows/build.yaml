@@ -10,7 +10,7 @@ on:
 
 # A PR build has no side effects, so superseding one is always safe:
 # when someone pushes a fixup commit, kill the run for the old commit
-# rather than paying for a 9 minute PDF build nobody will look at.
+# rather than paying for a PDF build nobody will look at.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -21,13 +21,13 @@ jobs:
     timeout-minutes: 30
 
     strategy:
-      # The three outputs are independent, and PDF is by far the slowest.
-      # With the default fail-fast, a WIKI failure 90 seconds in cancels
-      # the 9 minute PDF job, so the run tells you nothing about whether
-      # the PDF is healthy and the next push has to rediscover it.
+      # The outputs are independent. With the default fail-fast, a WIKI
+      # failure cancels the EPUB job, so the run tells you nothing about
+      # whether the EPUB is healthy and the next push has to rediscover it.
+      # (The PDF has its own jobs below.)
       fail-fast: false
       matrix:
-        build_focus: [WIKI, EPUB, PDF]
+        build_focus: [WIKI, EPUB]
     env:
       BUILD_FOCUS: ${{ matrix.build_focus }}
 
@@ -264,11 +264,120 @@ jobs:
         if-no-files-found: warn
         retention-days: 90
 
+  # The PDF (issue #238, Part B): the tagged book and the chapter PDFs,
+  # with the gates B1 (no TeX/tagpdf errors, no missing characters),
+  # B2 (structure: every figure's alt text, the duck an artifact) and B4a
+  # (the untagged build of the same sources has the same words and pages).
+  # All of them block. B3 (veraPDF) runs in the next job.
+  pdf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Pinned TeX Live 2026 (tlmgr r79639; latex-lab 2026-06-08, tagpdf
+    # 1.0c). TL2026 is the current release, so there is no historic tag
+    # yet: pin by digest. When moving the pin, re-check the
+    # \DocumentMetadata keys in main_tagged.tex (testphase key names have
+    # changed between releases) and the latex-lab interfaces
+    # cs341code.sty and cs341book.sty use (block and heading templates),
+    # then look at the visual diff; the gates catch errors, not looks.
+    container:
+      image: texlive/texlive:latest@sha256:1a1b8588cd73ac33fe1d7722c4065b3e6eaa3f3a20fb54d2934e42310264d134
+    # shell: bash runs steps with -eo pipefail, so a failure piped through
+    # tee is not lost.
+    defaults:
+      run:
+        shell: bash
+    env:
+      BUILD_FOCUS: PDF
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    # luaotfload's cache of the OpenType fonts. A fresh container builds it
+    # on the first run, which costs time in every job; it only changes with
+    # the image or the fonts cs341book.sty loads.
+    - name: Cache LuaTeX fonts
+      uses: actions/cache@v4
+      with:
+        path: /usr/local/texlive/2026/texmf-var/luatex-cache
+        key: luatex-cache-1a1b8588-${{ hashFiles('cs341book.sty', 'cs341code.sty') }}
+
+    - name: Install
+      run: |
+        bash _scripts/install.sh
+
+    - name: Build the PDFs, B1 and B2
+      run: |
+        start=$(date +%s)
+        bash _scripts/script.sh
+        echo "make pdf, B1 and B2: $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: B4a tagged vs untagged
+      run: |
+        start=$(date +%s)
+        cp main.pdf main-tagged.pdf
+        make TAGGED=0 main.pdf
+        mv main.pdf main-untagged.pdf
+        cp main-tagged.pdf main.pdf
+        bash _scripts/compare_pdf_text.sh main-untagged.pdf main-tagged.pdf b4a \
+          | tee -a "$GITHUB_STEP_SUMMARY"
+        echo "B4a (untagged build and comparison): $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload PDFs, logs and reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pdf
+        path: |
+          main.pdf
+          main-untagged.pdf
+          */*.pdf
+          main_tagged.log
+          main_wrapper.log
+          */*.pdf.log
+          b2.json
+          b4a/
+        if-no-files-found: warn
+
+  # B3: veraPDF against PDF/UA-2. The figure and alt-text rules block; the
+  # full report (every rule) is uploaded for review. Not in the container
+  # above because veraPDF runs as its own Docker image.
+  pdf-verapdf:
+    needs: pdf
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Download the PDF
+      uses: actions/download-artifact@v4
+      with:
+        name: pdf
+
+    - name: B3 veraPDF PDF/UA-2
+      run: |
+        # verapdf/cli:v1.30.2, pinned in the script.
+        bash _scripts/check_verapdf.sh main.pdf verapdf-ua2.json --strict-figures \
+          | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the veraPDF report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: verapdf-report
+        path: verapdf-ua2.json
+        if-no-files-found: warn
+
   # Part C of issue #238: a cheap, stdlib-only lint that checks every content
   # figure's \includegraphics carries non-empty alt text. It only reads the
   # .tex sources, so it doesn't need install.sh's TeX/pandoc toolchain and
-  # runs in seconds -- keep it in its own job, not the matrix above, so it
-  # isn't held hostage by (or holding hostage) the 9 minute PDF build.
+  # runs in seconds -- keep it in its own job, so it isn't held hostage by
+  # (or holding hostage) the much longer PDF build.
   alt-text-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 5

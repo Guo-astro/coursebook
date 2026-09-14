@@ -28,12 +28,13 @@ jobs:
       contents: write
 
     strategy:
-      # WIKI, EPUB and PDF deploy to three independent targets. With
-      # the default fail-fast a WIKI failure cancels the PDF job, so
-      # pdf_deploy silently goes stale even though the PDF was fine.
+      # WIKI and EPUB deploy to independent targets. With the default
+      # fail-fast a WIKI failure cancels the EPUB job, so epub_deploy
+      # silently goes stale even though the EPUB was fine. (The PDF has
+      # its own job, deploy-pdf, below.)
       fail-fast: false
       matrix:
-        build_focus: [WIKI, EPUB, PDF]
+        build_focus: [WIKI, EPUB]
     env:
       BUILD_FOCUS: ${{ matrix.build_focus }}
 
@@ -115,7 +116,6 @@ jobs:
     # epub_deploy branch with the sources deleted, so check out this
     # commit's sources again, to one side, for the check scripts.
     - name: Checkout sources for the smoke checks
-      if: matrix.build_focus != 'PDF'
       uses: actions/checkout@v4
       with:
         path: smoke-src
@@ -135,3 +135,53 @@ jobs:
       run: |
         git clone --depth=1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" "$RUNNER_TEMP/deployed-wiki"
         python3 smoke-src/_scripts/wiki_check.py "$RUNNER_TEMP/deployed-wiki" --root smoke-src
+
+  # The tagged PDF and the chapter PDFs (issue #238, Part B), built in the
+  # same pinned TeX Live 2026 container as build.yaml's pdf job, and
+  # force-pushed to pdf_deploy. Gates B1 and B2 run before the deploy (in
+  # script.sh), so a broken PDF is not published; B3 and B4a ran on the PR.
+  deploy-pdf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The GITHUB_TOKEN pushes pdf_deploy.
+    permissions:
+      contents: write
+    # Keep the digest in step with build.yaml.
+    container:
+      image: texlive/texlive:latest@sha256:1a1b8588cd73ac33fe1d7722c4065b3e6eaa3f3a20fb54d2934e42310264d134
+    defaults:
+      run:
+        shell: bash
+    env:
+      BUILD_FOCUS: PDF
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Cache LuaTeX fonts
+      uses: actions/cache@v4
+      with:
+        path: /usr/local/texlive/2026/texmf-var/luatex-cache
+        key: luatex-cache-1a1b8588-${{ hashFiles('cs341book.sty', 'cs341code.sty') }}
+
+    - name: Install
+      run: |
+        bash _scripts/install.sh
+
+    - name: Build coursebook
+      run: |
+        bash _scripts/script.sh
+
+    - name: Deploy the PDFs
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # The checkout belongs to another user than the container's root,
+        # and git refuses to work in it without this.
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "Github Actions Bot"
+        export COMMITTER_EMAIL="github-actions@github.com"
+        export AUTHOR_NAME="Github Actions"
+        bash _scripts/deploy.sh

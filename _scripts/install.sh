@@ -2,12 +2,12 @@
 
 set -o errexit
 
-# Install the Python packages we need. actions/setup-python provides the
-# interpreter (3.11 in the workflows).
-pip install -r requirements.txt
-
 if test $BUILD_FOCUS = "WIKI" || test $BUILD_FOCUS = "EPUB"
 then
+    # Install the Python packages we need. actions/setup-python provides
+    # the interpreter (3.11 in the workflows).
+    pip install -r requirements.txt
+
     # pandoc, pinned exactly. Ubuntu's apt pandoc is too old for us.
     #
     # Why this version (issue #238, Part A):
@@ -57,36 +57,20 @@ fi;
 
 if test $BUILD_FOCUS = "PDF"
 then
-    # texlive-full drags in 455 packages / 4.0 GB -- every language pack,
-    # ConTeXt, Metapost, the lot. The book needs 68 packages / 768 MB,
-    # listed below.
-    #
-    # Which package provides what (checked with apt-file on Ubuntu 24.04):
-    #   latex-base        book.cls fontenc geometry graphicx color hyperref
-    #                     natbib fancyhdr longtable grfext epstopdf-base
-    #   latex-recommended microtype listings xcolor setspace float chapterbib
-    #   latex-extra       mdframed mfirstuc comment framed glossaries titlesec
-    #                     tocloft wrapfig changepage csquotes epigraph fncychap
-    #   pictures          pgffor
-    #   fonts-recommended Charter type1 (bchr8a.pfb), Latin Modern
-    #   fonts-extra       mathdesign / mdbch. 614 MB of the 768 MB, so
-    #                     most of the remaining install time, but it is
-    #                     the only place mathdesign lives and it sets the
-    #                     book's body font. Dropping it changes every page.
-    #   luatex            lualatex, which the Makefile builds with
-    #   font-utils        epstopdf, for the 47 .eps drawings
-    #   latexmk           every build in the Makefile goes through latexmk
-    #   ghostscript       epstopdf's backend
-    sudo apt-get update -qq
-    sudo apt-get install -y --no-install-recommends \
-        texlive-latex-base \
-        texlive-latex-recommended \
-        texlive-latex-extra \
-        texlive-fonts-recommended \
-        texlive-fonts-extra \
-        texlive-pictures \
-        texlive-luatex \
-        texlive-font-utils \
-        latexmk \
-        ghostscript
+    # The PDF is built in the pinned TeX Live 2026 container
+    # (texlive/texlive, see .github/workflows/build.yaml), not with
+    # Ubuntu's apt TeX Live 2023: the tagged PDF (issue #238, Part B)
+    # needs the tagging code of a current LaTeX (latex-lab, tagpdf 1.0c),
+    # and cs341code.sty and cs341book.sty rely on it. The image has all of
+    # TeX Live, make, git and python3; add what the build and its gates
+    # still need:
+    #   python3-yaml    _scripts/gen_order.py (order.tex)
+    #   poppler-utils   pdfinfo/pdftotext for the B4a text comparison
+    #   python3-pikepdf _scripts/check_pdf_tags.py (B2)
+    # The container runs as root, so no sudo.
+    SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO=sudo
+    $SUDO apt-get update -qq
+    $SUDO apt-get install -y --no-install-recommends \
+        python3-yaml poppler-utils python3-pikepdf
+    lualatex --version | head -1
 fi;

@@ -29,7 +29,13 @@
 \RequirePackage{fontspec}
 \RequirePackage{unicode-math}
 \directlua{luaotfload.add_fallback("cs341mono", {"file:DejaVuSansMono.ttf:mode=node;"})}
-\setmonofont{Latin Modern Mono}[RawFeature={fallback=cs341mono}]
+% fontspec's Latin Modern Mono has no bold, so \textbf{\texttt{..}} (in
+% every \keyword) came out regular; the book set it in LM Mono Light Bold
+% (lmtk10), whose OpenType version is named here.
+\setmonofont{Latin Modern Mono}[
+  BoldFont=lmmonolt10-bold.otf, BoldItalicFont=lmmonolt10-boldoblique.otf,
+  BoldSlantedFont=lmmonolt10-boldoblique.otf,
+  RawFeature={fallback=cs341mono}]
 \setmainfont{XCharter}[
   Extension=.otf, UprightFont=*-Roman, BoldFont=*-Bold,
   ItalicFont=*-Italic, BoldItalicFont=*-BoldItalic,

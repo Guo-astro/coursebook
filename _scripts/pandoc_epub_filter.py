@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 
 """
-Pandoc filter to change each relative URL to absolute
+Pandoc filter for the EPUB build: give every image real alt text, and
+point .eps figures at their pre-rendered .png counterparts.
+
+Alt text comes from the \\includegraphics alt= key (pandoc >= 3.1.4), else
+the enclosing figure's caption; see alt_text.py. No alt means no build.
 """
 
-from panflute import run_filter, Str, Header, Image, Math, Link, RawInline
-import sys
-import re
 import os.path
+import sys
 
-default_image_alt = 'image'
+from panflute import run_filter, Image
 
-class NoAltTagException(Exception):
-    pass
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from alt_text import apply_alt, NoAltTagException  # noqa: E402,F401
+
 
 def replace_suffix(content, suffix_old, suffix_new):
     ret = content
@@ -20,28 +23,14 @@ def replace_suffix(content, suffix_old, suffix_new):
         ret = content[:-len(suffix_old)] + suffix_new
     return ret
 
-def deserialize(x):
-    """
-    Takes a panflute element x and returns
-    a basic stringified version of that element
-    """
-
-    if type(x) == Str:
-        return x.text
-    return ' '
 
 def doc_filter(elem, doc):
-    if type(elem) == Image:
-        # Get the number of chars for the alt tag
-        alt_name = ''.join(map(deserialize, elem._content.list))
-        alt_length = len(elem._content)
-        # No alt means no compile
-        # Accessibility by default
-        if alt_length == 0 or alt_name.lower() == default_image_alt:
-            raise NoAltTagException(elem.url)
+    if isinstance(elem, Image):
+        # Accessibility by default: raises NoAltTagException if there is
+        # neither an alt= key nor a caption.
+        apply_alt(elem)
 
-        # Otherwise link to the raw user link instead of relative
-        # That way the wiki and the site will have valid links automagically
+        # EPUB readers can't show .eps, so use the committed .png.
         new_url = replace_suffix(elem.url, '.eps', '.png')
         if not os.path.isfile(new_url):
             raise ValueError('{} Not found'.format(new_url))
@@ -51,6 +40,7 @@ def doc_filter(elem, doc):
 
 def main(doc=None):
     return run_filter(doc_filter, doc=doc)
+
 
 if __name__ == "__main__":
     main()

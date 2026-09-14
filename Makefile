@@ -1,6 +1,15 @@
 # Find all tex files one directory down
 TEX=$(shell find . -path "./.git*" -prune -o -type f -iname "*.tex" -print)
 MAIN_TEX=main_wrapper.tex
+# `make pdf TAGGED=1` (also chapters, debug) builds a tagged PDF through
+# main_tagged.tex, which prepends \DocumentMetadata. Experimental, see
+# docs/pdf-tagging-spike.md. Without TAGGED nothing below changes. Tagged
+# builds always rerun (FORCE), so switching modes never reuses a PDF built
+# in the other mode.
+ifeq ($(TAGGED),1)
+MAIN_TEX=main_tagged.tex
+TAGGED_FORCE=FORCE
+endif
 MAIN_TEX_SOURCE=main.tex
 PDF_TEX=$(patsubst %.tex,%.pdf,$(MAIN_TEX))
 MAIN_OUT=main.pdf
@@ -50,7 +59,7 @@ $(ORDER_TEX): $(ORDER_TEX_DEP)
 # order.tex is generated, and main.tex \input's it, so a chapter build from
 # a clean tree needs it too. Note $< rather than $^: the recipe wants only
 # the chapter's own .tex here, not every prerequisite.
-$(CHAPTER_PDF): %.pdf: %.tex $(ORDER_TEX)
+$(CHAPTER_PDF): %.pdf: %.tex $(ORDER_TEX) $(TAGGED_FORCE)
 	echo '\\let\\cleardoublepage\\clearpage' > $@.tmp
 	echo "\includeonly{$(basename $<)}\input{$(MAIN_TEX)}" >> $@.tmp
 	@latexmk -interaction=nonstopmode -quiet -pdflatex=lualatex -pdf -jobname="$@" $@.tmp \
@@ -59,16 +68,19 @@ $(CHAPTER_PDF): %.pdf: %.tex $(ORDER_TEX)
 	@ls $@ > /dev/null
 	-@rm $@.tmp
 
-$(MAIN_OUT): $(TEX) $(MAIN_TEX) $(BIBS) Makefile $(ORDER_TEX)
+$(MAIN_OUT): $(TEX) $(MAIN_TEX) $(BIBS) Makefile $(ORDER_TEX) $(TAGGED_FORCE)
 	@latexmk -quiet -pdflatex=lualatex -interaction=nonstopmode -pdf $(MAIN_TEX) \
 		|| { echo "*** latexmk failed"; grep -n -A3 '^! ' $(basename $(MAIN_TEX)).log 2>/dev/null; false; }
 	@ls $(PDF_TEX) > /dev/null
 	@mv $(PDF_TEX) $(MAIN_OUT)
 	@echo "Finished"
 
-$(PDF_TEX)-debug: $(TEX) $(MAIN_TEX) $(BIBS) Makefile
+$(PDF_TEX)-debug: $(TEX) $(MAIN_TEX) $(BIBS) Makefile $(TAGGED_FORCE)
 	-@latexmk -interaction=nonstopmode -f -pdf $(MAIN_TEX) > latexmk.out
 	@mv $(PDF_TEX)-debug $(MAIN_OUT)
+
+.PHONY: FORCE
+FORCE:
 
 .PHONY: clean
 clean:

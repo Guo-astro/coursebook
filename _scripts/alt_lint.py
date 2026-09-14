@@ -84,20 +84,28 @@ ALLOWLIST_PATHS = {
 
 GENERIC_ALT_WORDS = {"diagram", "figure", "image", "picture", "graph"}
 
-# LaTeX escape macros that are known to render as a single sensible plain
-# character in every current output format (PDF via lualatex, and EPUB/wiki
-# via pandoc's LaTeX reader), so they do not "leak" into rendered alt text.
-# Notably `\_` (used for `c\_str` in this book's alt text) and `\textbackslash`
-# (used to spell out a literal backslash) are both in this set -- anything
-# else starting with a backslash is flagged as a warning because it is more
-# likely to be a formatting macro (\textbf, \emph, ...), a custom book macro,
-# or math that either won't render as plain text or won't survive into the
-# untagged/PDF path at all.
+# LaTeX escapes that render as one plain character in every output: the
+# tagged PDF's /Alt (measured with TeX Live 2026, tagpdf 1.0c) and pandoc's
+# EPUB and wiki. `\_` (as in `c\_str`) is one. Anything else starting with
+# a backslash is warned about: a formatting macro (\textbf, \emph, ...), a
+# custom book macro or math may not come out as plain text.
+#
+# \textbackslash, \textasciitilde and \textasciicircum are deliberately NOT
+# here: tagging copies them into /Alt as typed, so a screen reader says
+# "backslash textbackslash 0". Write the character's name in words instead
+# ("the terminating null byte").
 SAFE_LATEX_ESCAPES = {
     r"\_", r"\%", r"\&", r"\$", r"\#", r"\{", r"\}",
-    r"\textbackslash", r"\ldots", r"\dots",
-    r"\textasciitilde", r"\textasciicircum",
+    r"\ldots", r"\dots",
 }
+
+# TeX input conventions that are not escapes but still reach /Alt as typed
+# (TeX Live 2026): the quote and dash ligatures and inline math.
+TEX_LITERAL_LEAKS = (
+    (re.compile(r"``|''"), "TeX quotes (`` or '')"),
+    (re.compile(r"--"), "a TeX dash (-- or ---)"),
+    (re.compile(r"(?<!\\)\$"), "inline math ($...$)"),
+)
 
 TEX_GLOB_DIRS_SKIP = {".git", "_scripts", "out", "build"}
 
@@ -600,6 +608,12 @@ def scan(root: str) -> list[dict]:
                         warnings.append(
                             f"{relfile}:{line}: alt text contains {token!r}, "
                             f"which may not render as plain text"
+                        )
+                for leak_re, what in TEX_LITERAL_LEAKS:
+                    if leak_re.search(alt):
+                        warnings.append(
+                            f"{relfile}:{line}: alt text contains {what}, which "
+                            f"reaches the tagged PDF's /Alt as typed"
                         )
 
             results.append({

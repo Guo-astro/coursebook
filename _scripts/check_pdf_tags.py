@@ -36,20 +36,28 @@ def norm(text):
     return re.sub(r"\s+", " ", str(text)).strip()
 
 
-# How LaTeX renders the escapes that appear in the book's alt= texts.
+# The expected /Alt is the alt= text as a reader should get it: rendered,
+# the way it looks typeset, not the LaTeX source. Anything tagging copies
+# through as typed ("\\textbackslash 0", ``quotes'', --) then fails to
+# match, so an escape leak is a failure, not a pass.
 _LATEX_ESCAPES = [
     (r"\\textbackslash\s*(\{\})?", "\\\\"),
     (r"\\textasciitilde\s*(\{\})?", "~"),
     (r"\\textasciicircum\s*(\{\})?", "^"),
+    (r"\\(?:ldots|dots)\s*(\{\})?", "\u2026"),
+    (r"\\(?:emph|textit|textbf|texttt|textsf|textrm)\{([^{}]*)\}", r"\1"),
     (r"\\([_%&#$])", r"\1"),
     (r"\\[{}]", lambda m: m.group()[1]),
     (r"(?<!\\)~", " "),
-    (r"``|''", '"'),
+    (r"``", "\u201c"),
+    (r"''", "\u201d"),
+    (r"---", "\u2014"),
+    (r"--", "\u2013"),
 ]
 
 
 def source_to_text(alt):
-    """Normalise a source alt= value to the text tagpdf puts in /Alt."""
+    """Normalise a source alt= value to its rendered text (see above)."""
     s = str(alt)
     for pat, rep in _LATEX_ESCAPES:
         s = re.sub(pat, rep, s)

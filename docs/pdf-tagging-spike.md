@@ -1,10 +1,252 @@
-# PDF tagging spike (issue #238, Part B)
+# Tagged PDF (issue #238, Part B)
 
-Measured 2026-09-13. This is the evidence for the Part B decision between
-**3a (partial tagging with containment)** and **3b (package replacement)**.
-It is not part of the book build.
+**Decision: option 3b.** The packages the LaTeX tagging code does not
+support are replaced, not contained, and the tagged PDF is the default
+build (`make pdf`; `make pdf TAGGED=0` for an untagged build to debug).
+CI builds it in a pinned TeX Live 2026 container, and the gates B1–B4
+block. The 3a spike that came first (containment hooks, same TeX Live) is
+kept at the end of this file as the evidence it was.
 
-## TL;DR
+`main_tagged.tex` is now only `\DocumentMetadata` (`lang=en-US`,
+`pdfversion=2.0`, `pdfstandard=ua-2`, `testphase={phase-III,firstaid}`)
+around `main_wrapper.tex`: no hooks.
+
+## What was replaced
+
+| Package | Used for | Replaced by | Tagged structure now | Lost or changed |
+|---|---|---|---|---|
+| listings | 492 `lstlisting`, the 7-block `minted` emulation, 1 `\lstinputlisting` | `cs341code.sty`: an environment on the kernel's `verbatim`, declared as a latex-lab block | each block one `/Code` element, each line one child (`codeline`, role `/Span`) | **syntax colouring** (keywords purple, strings red, comments grey italic, braces red); the invisible `frame=bt` rules. Kept: grey box, 1.5cm margins, 20pt above and below, wrapping at spaces under the line's own indentation + 20pt, tab stops every 4 columns, trailing blank lines dropped, `minted` blocks small and unsplit. A paragraph that continues straight after a block (no blank line; 8 in the book) is now indented; listings did not indent it |
+| fncychap `[Bjornstrup]` | chapter heads | `cs341book.sty`: the same grey bar, number and title box, drawn by latex-lab's chapter heading template (tagged) or `\@makechapterhead` (untagged) | `/H1` | number font: TeX Gyre Chorus, the OpenType Zapf Chancery; the head sits 9pt higher than before |
+| titlesec | section sizes and spacing in main.tex | plain `\@startsection` with the same values (`cs341book.sty`) | `/H2`…`/H6` (under titlesec the spike's sections had **no** heading tags at all) | nothing measurable |
+| mathdesign (Charter, Type 1, T1) | body and math font | XCharter + XCharter-Math (OpenType, fontspec + unicode-math) | — | same design, but it sets a little wider, so paragraphs reflow. Fixes a silent loss: T1 Charter has no ’ “ ” under LuaLaTeX, so every one in the sources was dropped from the PDF (24 in background alone), as were the CJK author names. Typewriter: Latin Modern Mono as before, with its bold named explicitly (LM Mono Light Bold, as `\keyword` used), since fontspec's family has none |
+| wrapfig, mdframed | nothing (loaded, unused) | removed | — | — |
+
+Kept, measured to work tagged: **epigraph** (0 errors; the status page's
+condition, a blank line after `\epigraph`, holds in every chapter), **framed**
+(the grey code box and the proof box; 0 tagpdf errors, veraPDF clean),
+**float** `[H]` (firstaid tags it), **chapterbib** (its "partial" comment is
+about the caption package, which the book does not load), **glossaries**
+(loaded; `\printglossaries` is commented out in main.tex, so the book has no
+glossary page), **tocloft**, **hyperref** (`hidelinks`, `pdftitle` and
+`pdfdisplaydoctitle` now set explicitly, since the class option no longer
+reaches it with `\DocumentMetadata`).
+
+`proof`: latex-lab defines a proof environment, so prelude.tex's
+`\newenvironment{proof}` failed. `cs341book.sty` removes latex-lab's
+definition first. prelude.tex keeps its plain `\newenvironment`, because
+pandoc expands that for the EPUB and ignores `\NewDocumentEnvironment`.
+
+Fallback fonts: a code character Latin Modern Mono lacks falls back to
+DejaVu Sans Mono (one block shows U+FFFD), and the AUTHORS.md list uses
+HaranoAji Mincho for its CJK names. Only that list loads the CJK font: a
+fallback font is loaded with every instance of a font that names it, and
+putting it on the main font made the build about 2.5× slower.
+
+## Code blocks
+
+Candidates, each measured on a sample of the book's blocks (13 blocks
+covering C, bash, x86 asm, tabs, long lines, a block in `\item`, minted,
+trailing and leading blank lines), TeX Live 2026, tagged:
+
+| Candidate | tagpdf errors | Structure |
+|---|---|---|
+| listings, as is | 2 ("para hooks differ") | none usable |
+| fancyvrb `Verbatim` (firstaid patches it) | 1 | `/Code` with a `/Span` per line, but lines are fixed boxes: no wrapping |
+| kernel `verbatim` (latex-lab block) | **0** | `/Code` with a `/Span` per line |
+| piton, fvextra, minted | — | status *currently-incompatible* in TL2026's tagging-status data |
+
+The kernel `verbatim` is the only one with per-line structure natively and
+no errors, and a paragraph per line lets long lines wrap. `cs341code.sty`
+declares its own latex-lab block instance like the kernel's `verbatim`
+(`\SimpleBlockEnv`) and, untagged, uses the kernel's `\@verbatim`. The block
+text goes through Lua (tab stops, trailing blank lines) and is read back as
+input lines with the verbatim catcodes.
+
+**No source changed.** The environment names stay (`lstlisting`, `minted`,
+`\lstinputlisting`), so pandoc's input is untouched: its AST of main.tex is
+byte-identical to master's. The packages are loaded with `\RequirePackage`,
+because pandoc parses a local `.sty` named in `\usepackage` (it did, and
+then ignored prelude.tex's proof).
+
+**Code text identity.** All 500 blocks (499 `lstlisting`/`minted` plus
+AUTHORS.md) typeset once with the old listings setup and once with
+cs341code.sty, tagged and untagged, then `pdftotext -layout` per block,
+compared with white space removed (wrapping, listings' column spacing and
+the space its `literate` put before every `{` are layout):
+**497 identical** in all three comparisons (old vs new, new vs source, tagged
+vs untagged). The other 3 are characters listings dropped or garbled and the
+new build shows: the em dash in honors/kernel.tex, U+FFFD in
+background.tex:514 (listings printed its DEL byte as "-"), and the CJK names.
+
+## Problems the measurements found
+
+* **pandoc reads local packages** named in `\usepackage`: loading
+  `cs341book.sty` that way changed the EPUB. `\RequirePackage` it is.
+* **framed centres its frame** (`\centerline`): a frame narrower than the
+  line put every code block 18.6pt right of listings' position.
+* **Lists**: inside an `\item` the kernel verbatim indents by `\leftskip`,
+  latex-lab's block by `\parshape`; the frame now takes the list's
+  indentation itself, as framed's shaded box does.
+* **Chapter head**: fncychap's number bar is 10pt wider than the line.
+  The tagged heading starts with a link target, TeX broke the line there,
+  and tagged chapters sat 13.75pt lower than untagged ones, which moved
+  page breaks. The bar is now a `\textwidth` box with the number hanging out.
+* **Section spacing after code**: a heading sets `\if@nobreak`, and the
+  first paragraph after it clears it; inside the frame `\FrameRestore`
+  makes the flag locally false, so it was never cleared and the next
+  `\section` lost its space above (15pt, untagged build only). The package
+  now clears it once framed has used it.
+* **`\@endpetrue` after the framed box** unbalances latex-lab's paragraph
+  structure ("no open structure on the stack"), so a paragraph that
+  continues straight after a block cannot be kept unindented in the tagged
+  build; both builds now indent it.
+* **Other candidates' traps**: fancyvrb's lines are fixed-width boxes (no
+  wrapping); listings as is gives 2 tagpdf errors per sample.
+
+## Gates
+
+Final full builds of this branch (TeX Live 2026, tagged `make pdf` and
+`make pdf TAGGED=0`, main book and all 18 chapter PDFs):
+
+| Gate | Result |
+|---|---|
+| B1 logs | **0 TeX errors, 0 tagpdf errors, 0 tagpdf warnings, 0 missing characters** in all 19 logs of both builds (41 overfull boxes in the main book, as many in either build) |
+| B2 structure | Tagged, PDF 2.0, `/Lang en-US`; **48/48 `/Figure` with `/Alt` equal to the rendered source alt text**; the duck is an artifact; every chapter PDF passes (its own figures: 3+3+10+4+1+8+8+4+2+1+1+3 = 48). 508 `/Code` elements with 5,111 per-line children; 18 H1, 169 H2, 225 H3, 17 H4, 6 H5; 248 `/Formula`, all with MathML |
+| B3 veraPDF PDF/UA-2 | **compliant: 0 of 1,727 rules fail** (2,006,117 checks) |
+| B4a words | main book: **135,702 = 135,702 words**; same multiset apart from page numbers |
+| B4a pages | main book **392 tagged, 394 untagged**; ipc 26 vs 27; other chapters equal in pages, but 10 differ in running-head words (below) |
+
+**The B4a page difference is intrinsic to tagging**, not a replaced
+package. The first page that differs (main p. 232, ipc) holds two
+`table[h]` floats written inside `\begin{center}`. A minimal document
+without any of this book's packages reproduces it: after such a float the
+kernel's `center` (untagged) leaves an empty centred line, latex-lab's
+`center` block (tagged) does not, so the tagged text sits one baseline
+(13.75pt) higher after each. The sources have 15 floats wrapped that way.
+The chapter PDFs take their first page number from the main book's `.aux`,
+so a shifted page parity swaps their even/odd running heads (chapter vs
+section title), which is the chapter word differences. Four earlier
+causes of difference were in this branch's own code and are fixed (the
+chapter head's line break, code in lists, section space after code, and
+`\tightlist`, which latex-lab lists also treated differently). Writing those
+floats as `\begin{table}[h]\centering` would remove the last one (see Open
+items).
+
+## CI
+
+The PDF leaves the Ubuntu matrix (apt TeX Live 2023) for its own jobs in
+the pinned `texlive/texlive` container (TeX Live 2026, by digest):
+
+| Workflow | Job | Runs | Blocks on |
+|---|---|---|---|
+| build.yaml | `pdf` (container) | `make pdf`; B1 `check_tex_logs.sh`; the B2 normalisation tests; B2 `check_pdf_tags.py` on main.pdf and every chapter PDF; B4a: `make TAGGED=0 pdf`, B1 on its logs, `compare_pdf_text.sh` for main.pdf (and, reported only, every chapter PDF); uploads PDFs, logs, reports | B1, B2, B4a main-book words (page count reported: see Gates) |
+| build.yaml | `pdf-verapdf` (runner, after `pdf`) | B3 `check_verapdf.sh --strict-figures` (verapdf/cli:v1.30.2); uploads the full report | the figure and alt-text rules |
+| deploy.yaml | `deploy-pdf` (container) | `make pdf`, B1, B2, then `deploy.sh` to pdf_deploy; uploads the logs if the build fails | B1, B2 |
+
+`install.sh` installs only what the image lacks for the PDF
+(`python3-yaml`, `poppler-utils`, `python3-pikepdf`); the apt TeX Live list
+and its rationale are gone. luaotfload's font cache is kept between runs
+with `actions/cache` (one chapter: 32s with a cold cache, 20s warm), keyed
+on the workflow files, so it changes with the image pin.
+
+**Timing.** Not measured on GitHub's runners (nothing here is pushed).
+Measured locally, in fresh containers of the pinned amd64 image under
+emulation on Apple silicon, the tagged and untagged builds running side by
+side:
+
+| Build (`make pdf`: main book + 18 chapter PDFs) | seconds |
+|---|---|
+| tagged (default) | 641–671 |
+| untagged (`TAGGED=0`) | 277–314 |
+
+(Runs that overlapped other builds took up to 880s and 515s.)
+
+The old listings setup on the same image took 218s untagged for the whole
+`make pdf`. Most of the rise is the OpenType fonts (luaotfload and
+unicode-math on every LuaLaTeX run); tagging roughly doubles it again. The
+PDF job is the tagged build plus the untagged one plus a few minutes for
+the image pull and the checks. If it ever nears `timeout-minutes: 30`, the
+untagged B4a build can move to its own job, in parallel (it needs only the
+sources); parallel make is not an option, because the main book and the
+chapter PDFs write the same chapter `.aux` files.
+
+## B4b: master (TeX Live 2023) vs this branch
+
+Master as CI builds it today (TeX Live 2023, untagged, listings,
+fncychap, mathdesign) against this branch's default build (TeX Live 2026,
+tagged). Differences are expected; this is what they are.
+
+* **Pages**: main.pdf 392 in both. Chapter PDFs: background 26→25,
+  malloc 17→18, synchronization 49→50; the other 15 are unchanged.
+* **Words** (main.pdf, pdftotext, line-end hyphens joined): 138,788 →
+  135,702. Sorted by cause:
+  * 3,019 `.` only in master: the ToC's dot leaders, which the tagged
+    PDF marks as artifacts;
+  * math: unicode-math's letters are Unicode math italic (𝑝𝑖 for pi,
+    𝐸[𝑆] for E[S]);
+  * curly quotes: master's T1 Charter dropped every ’ “ ” in the prose
+    (now rendered); in code, listings extracted `'` as ’, the new blocks
+    keep ASCII `'`;
+  * braces: listings put a space before every `{` in code;
+  * running heads and page numbers moved with the reflow;
+  * the CJK author names, dropped before, now present.
+  No word of prose or code is lost; the code text check above is the
+  exact one.
+
+## Open items
+
+1. **CI time on GitHub's runners is unmeasured** (nothing is pushed). The
+   estimate above is from emulated local builds; watch the first runs.
+2. **No syntax colouring in code.** No highlighter works with tagging in
+   TeX Live 2026 (listings, minted, fvextra, piton are all
+   *currently-incompatible*); revisit when one does.
+3. **The 8 paragraphs that continue straight after a code block are
+   indented** (listings did not indent them). Fixing it needs latex-lab's
+   block end and framed to cooperate.
+4. **framed** is *currently-incompatible* on the status page ("produces
+   incorrect tagging structures"). Here it measures clean (0 tagpdf errors,
+   veraPDF passes, `/Code` structure intact, LuaTeX tags by attributes),
+   but it is the dependency to re-check when the pin moves; tcolorbox
+   (*partially-compatible*) is the alternative for the grey box.
+5. **latex-lab interfaces** the packages use are test-phase: block
+   instances, the `verbatim/startline` socket, `\legacyverbatimsetup`,
+   heading templates. Re-check them (and the visual diff) at each pin move.
+6. **Language of the CJK author names**: the document is `/Lang en-US`;
+   the three names are not marked as Chinese or Japanese.
+7. **Chapter titles do not wrap** (one-line box; the longest title fits).
+   fncychap's `\parbox` wrapped them, but a `\parbox` puts a Div and a P
+   inside the `/H1`, which PDF/UA-2 forbids.
+8. **No glossary page**, as before: `\printglossaries` is commented out in
+   main.tex.
+9. **Math letters** are Unicode math italic now (unicode-math), so plain
+   text extraction gives 𝑝𝑖 rather than pi. In exchange every formula has
+   MathML: all 248 `/Formula` elements carry MathML associated files
+   (luamml), which the spike's build could not produce ("no unicode-math").
+10. **The pin** is the digest of `texlive/texlive:latest`; move to the
+    TL2026-historic tag when it exists.
+11. **deploy-pdf runs B1 and B2 only**; B3 and B4a run on the PR, so
+    branch protection should require the PR's checks.
+12. **B4a pages**: 15 `table`/`figure` floats sit inside `\begin{center}`,
+    which latex-lab's `center` spaces one line tighter than the kernel's
+    (above). Rewriting them as `\begin{table}[h]\centering` would make
+    the tagged and untagged builds paginate identically; it changes the
+    sources, so it is left for the maintainer.
+13. **Chapter PDFs** log `Label __tag_graphic.N multiply defined`: with
+    `\includeonly` a chapter build reads the other chapters' `.aux` from
+    the main build, and tagpdf's graphic labels restart in every job. B2
+    and veraPDF pass on the chapter PDFs checked; it is a warning.
+14. **GLM could not review the first half of cs341code.sty** (the
+    scanners, the Lua block and the frame): three attempts on two models
+    returned nothing. The code-text identity check and the position
+    measurements above cover that code.
+
+# Appendix: the 3a spike (2026-09-13, superseded)
+
+This was the evidence for the Part B decision between **3a (partial
+tagging with containment)** and **3b (package replacement)**. The
+maintainer chose 3b; the containment described here was removed.
+
+## Spike TL;DR
 
 **Option 3a works on TeX Live 2026 without replacing any package.** With
 the containment in `main_tagged.tex` (about 40 lines of hooks, none of

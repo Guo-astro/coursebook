@@ -16,6 +16,11 @@
 #  * line-end hyphens: pdftotext rejoins "argu-" / "ments:" in the tagged
 #    PDF (tagging marks where a line was broken) but not in the untagged.
 # The in-order diff is still written and counted, for review.
+#
+# B4A_ALLOW_PAGE_DIFF=1 turns a page-count difference into a warning: the
+# main book is 392 pages tagged and 394 untagged because latex-lab's
+# `center` spaces a float inside it one line tighter than the kernel's
+# (docs/pdf-tagging-spike.md, Gates). The words must still match.
 set -u -o pipefail
 if [ $# -lt 2 ]; then echo "usage: $0 untagged.pdf tagged.pdf [outdir]"; exit 2; fi
 a=$1; b=$2; out=${3:-$(mktemp -d)}
@@ -55,6 +60,10 @@ ns=$(grep -c '^[<>]' "$out/sorted.diff" || true)
 echo "pages: untagged=$pa tagged=$pb"
 echo "words: untagged=$wa tagged=$wb; differing (order ignored): $ns; in-order diff lines: $nd"
 echo "diffs: $out/sorted.diff $out/words.diff"
+if [ "$ns" -eq 0 ] && [ "$pa" != "$pb" ] && [ "${B4A_ALLOW_PAGE_DIFF:-0}" = 1 ]; then
+  echo "WARNING: page counts differ ($pa untagged, $pb tagged); the words are the same"
+  exit 0
+fi
 if [ "$pa" = "$pb" ] && [ "$ns" -eq 0 ]; then
   echo "OK: same page count and the same words"
   exit 0

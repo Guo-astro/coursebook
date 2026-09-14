@@ -5,7 +5,8 @@
 %   titlesec               the section sizes and spacing in main.tex
 % and settles two clashes with the tagging code (proof, hidelinks).
 % pandoc never reads this file (it ignores \usepackage), so none of this
-% reaches the EPUB or the wiki. prelude.tex loads it after hyperref.
+% reaches the EPUB or the wiki. prelude.tex loads it first, with
+% \RequirePackage (pandoc does parse a local .sty named in \usepackage).
 %
 % With \DocumentMetadata (the default `make pdf`) chapter heads go through
 % latex-lab's heading templates, which tag them as /H1; without it (`make
@@ -100,7 +101,10 @@
    \colorbox[gray]{.85}{\hbox to\dimexpr\textwidth-20pt\relax
      {\hfill\Large\sffamily\bfseries #1}}\par}}
 
-\ifdefined\ParseLaTeXeHeading
+% Tagged (latex-lab's heading templates are loaded) or not.
+\newif\ifcs@headtemplates
+\IfInstanceExistsTF{heading}{chapter}{\cs@headtemplatestrue}{\cs@headtemplatesfalse}
+\ifcs@headtemplates
   % Tagged: latex-lab's chapter heading instance with our drawing. No
   % prefix, so there is no "Chapter" word, as with fncychap.
   \DeclareInstance{heading}{chapter}{display}

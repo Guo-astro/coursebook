@@ -11,8 +11,9 @@
 %
 % The environment names stay the same (lstlisting, minted and
 % \lstinputlisting), because pandoc reads them for the EPUB and the wiki
-% and keeps their language. Options are accepted and ignored. pandoc never
-% reads this file (it ignores \usepackage).
+% and keeps their language. Options are accepted and ignored. prelude.tex
+% loads this file with \RequirePackage, which pandoc does not parse (it
+% does parse a local .sty named in \usepackage).
 %
 % With \DocumentMetadata (the default `make pdf`), the blocks are latex-lab
 % blocks, like the kernel's verbatim; without it (`make pdf TAGGED=0`) they
@@ -130,10 +131,19 @@
     \hskip\dimexpr\cs@code@margin-\cs@code@pad\relax
     \fboxsep\cs@code@pad\colorbox{shadecolor}{##1}\hss}}%
   \MakeFramed{\hsize\dimexpr\linewidth-2\cs@code@margin\relax
-    \FrameRestore\@totalleftmargin\z@\linewidth\hsize\parshape\z@}}
+    \FrameRestore\@totalleftmargin\z@\linewidth\hsize\parshape\z@}%
+  % A heading just before the block sets \if@nobreak (globally), so that no
+  % page break follows it; the first paragraph after it normally clears
+  % that. Inside the frame \FrameRestore makes it locally false, so it was
+  % never cleared, and the next \section added no space above it (seen in
+  % the untagged build). framed has used it by now: clear it.
+  \@nobreakfalse}
 \def\cs@code@endframe{\endMakeFramed\par\addvspace{\cs@code@skip}}
 
-\ifdefined\SimpleBlockEnv
+% Tagged (latex-lab's block module is loaded) or not.
+\newif\ifcs@code@tagged
+\IfInstanceExistsTF{blockenv}{verbatim}{\cs@code@taggedtrue}{\cs@code@taggedfalse}
+\ifcs@code@tagged
   % Tagged build: a latex-lab block declared like the kernel's verbatim
   % (latex-lab-block), so the block is a verbatim structure (role /Code)
   % and every line a codeline (role /Span). Our own instances only change

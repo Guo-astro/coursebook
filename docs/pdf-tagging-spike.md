@@ -270,7 +270,10 @@ Rejected:
    Part C on another branch, and the task is to accept a JSON file until
    then; CI now emits a warning instead of failing.
 
-<!-- REVIEW-MORE -->
+The review output was cut off at the start of a twelfth finding (about
+`main_tagged.tex`); two further runs (one on the fallback model
+`nvidia/z-ai/glm-5.3-flash`) returned no findings, so that item is
+unknown.
 
 ## How to reproduce
 

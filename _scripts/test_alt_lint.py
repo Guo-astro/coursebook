@@ -184,6 +184,102 @@ class ScanTests(unittest.TestCase):
         results = alt_lint.scan(self.root)
         self.assertIsNone(results[0]["caption"])
 
+    def test_extra_whitespace_around_equals(self):
+        write(self.root, "ch/ch.tex", (
+            "\\includegraphics[width=1cm,alt  =  {A real description}]{ch/a.eps}\n"
+        ))
+        results = alt_lint.scan(self.root)
+        self.assertFalse(results[0]["_missing_alt"])
+        self.assertEqual(results[0]["alt"], "A real description")
+
+    def test_duplicate_key_last_one_wins(self):
+        write(self.root, "ch/ch.tex", (
+            "\\includegraphics[alt={stale},alt={fresh}]{ch/a.eps}\n"
+        ))
+        results = alt_lint.scan(self.root)
+        self.assertEqual(results[0]["alt"], "fresh")
+
+    def test_starred_includegraphics_is_scanned(self):
+        write(self.root, "ch/ch.tex", (
+            "\\includegraphics*[width=1cm,alt={starred works}]{ch/a.eps}\n"
+        ))
+        results = alt_lint.scan(self.root)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["alt"], "starred works")
+
+    def test_caption_with_short_title_is_found(self):
+        write(self.root, "ch/ch.tex", (
+            "\\begin{figure}[H]\n"
+            "\\includegraphics[alt={x}]{ch/a.eps}\n"
+            "\\caption[Short]{The long caption}\n"
+            "\\end{figure}\n"
+        ))
+        results = alt_lint.scan(self.root)
+        self.assertEqual(results[0]["caption"], "The long caption")
+
+    def test_caption_with_space_before_brace_is_found(self):
+        write(self.root, "ch/ch.tex", (
+            "\\begin{figure}[H]\n"
+            "\\includegraphics[alt={x}]{ch/a.eps}\n"
+            "\\caption {The caption}\n"
+            "\\end{figure}\n"
+        ))
+        results = alt_lint.scan(self.root)
+        self.assertEqual(results[0]["caption"], "The caption")
+
+    def test_two_image_caption_pairs_in_one_figure(self):
+        write(self.root, "ch/ch.tex", (
+            "\\begin{figure}[H]\n"
+            "\\includegraphics[alt={Before}]{ch/a.eps}\n"
+            "\\caption{Before}\n"
+            "\\includegraphics[alt={After}]{ch/b.eps}\n"
+            "\\caption{After}\n"
+            "\\end{figure}\n"
+        ))
+        results = alt_lint.scan(self.root)
+        self.assertEqual(len(results), 2)
+        by_path = {r["path"]: r for r in results}
+        self.assertEqual(by_path["ch/a.eps"]["caption"], "Before")
+        self.assertEqual(by_path["ch/b.eps"]["caption"], "After")
+
+    def test_commented_out_comment_marker_does_not_eat_real_include(self):
+        # A `% \begin{comment}` is a dead marker (the % comments it out),
+        # not a live environment start -- it must not cause everything up
+        # to the next literal "\end{comment}" (live or not) to be blanked.
+        write(self.root, "ch/ch.tex", (
+            "% \\begin{comment}\n"
+            "\\includegraphics[width=1cm]{ch/real.eps}\n"
+            "% \\end{comment}\n"
+        ))
+        results = alt_lint.scan(self.root)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["path"], "ch/real.eps")
+        self.assertTrue(results[0]["_missing_alt"])
+
+    def test_lstlisting_body_is_not_scanned(self):
+        write(self.root, "ch/ch.tex", (
+            "\\begin{lstlisting}\n"
+            "\\includegraphics{demo-figure.eps}\n"
+            "\\end{lstlisting}\n"
+        ))
+        results = alt_lint.scan(self.root)
+        self.assertEqual(results, [])
+
+    def test_book_order_expands_input_chain(self):
+        write(self.root, "order.yaml", "- ch/ch\n")
+        write(self.root, "ch/ch.tex", (
+            "\\input{ch/first.tex}\n"
+            "\\input{ch/second.tex}\n"
+        ))
+        write(self.root, "ch/first.tex", "\\includegraphics[alt={one}]{ch/1.eps}\n")
+        write(self.root, "ch/second.tex", "\\includegraphics[alt={two}]{ch/2.eps}\n")
+        results = alt_lint.scan(self.root)
+        self.assertEqual([r["file"] for r in results], ["ch/first.tex", "ch/second.tex"])
+
+    def test_zero_tex_files_raises(self):
+        with self.assertRaises(RuntimeError):
+            alt_lint.scan(self.root)
+
 
 class CliTests(unittest.TestCase):
     def setUp(self):

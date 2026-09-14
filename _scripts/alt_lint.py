@@ -91,27 +91,18 @@ TEX_GLOB_DIRS_SKIP = {".git", "_scripts", "out", "build"}
 # Brace-aware tokenizing helpers
 # ---------------------------------------------------------------------------
 
-def strip_comments(text: str) -> str:
-    """Remove `%...` LaTeX comments (but not escaped `\\%`) and
-    `\\begin{comment}...\\end{comment}` blocks, preserving line numbers
-    (and hence line count) so later line-number bookkeeping stays correct.
-    Comment-stripped characters are replaced with spaces, and comment
-    blocks' interiors are blanked out but their newlines are kept.
-    """
-    # First blank out \begin{comment}...\end{comment} blocks (case as-is,
-    # non-greedy across lines), keeping newlines so line numbers don't shift.
-    def blank_keep_newlines(m: re.Match) -> str:
-        s = m.group(0)
-        return "".join(c if c == "\n" else " " for c in s)
+# Environments whose body is literal text, not LaTeX to be interpreted --
+# code listings and verbatim blocks can legitimately contain the string
+# "\includegraphics" (e.g. an example showing how graphicx is used) without
+# that being a real figure. `comment` behaves the same way for our purposes:
+# its body is inert. Blanking all of these the same way, before scanning,
+# keeps a documentation snippet from being mistaken for a real figure.
+VERBATIM_LIKE_ENVS = ("comment", "verbatim", "lstlisting", "minted")
 
-    text = re.sub(
-        r"\\begin\{comment\}.*?\\end\{comment\}",
-        blank_keep_newlines,
-        text,
-        flags=re.DOTALL,
-    )
 
-    # Then strip `%` line comments, char by char so we can honor `\%`.
+def _strip_percent_comments(text: str) -> str:
+    """Strip `%...` LaTeX comments (but not escaped `\\%`), char by char,
+    keeping the newline so line numbers are unaffected."""
     out = []
     i = 0
     n = len(text)
@@ -136,6 +127,35 @@ def strip_comments(text: str) -> str:
         out.append(c)
         i += 1
     return "".join(out)
+
+
+def strip_comments(text: str) -> str:
+    """Remove `%...` LaTeX comments (but not escaped `\\%`) and
+    verbatim-like environment bodies (`comment`, `verbatim`, `lstlisting`,
+    `minted`), preserving line numbers (and hence line count) so later
+    line-number bookkeeping stays correct. Blanked characters are replaced
+    with spaces; blanked blocks keep their newlines.
+
+    `%` comments are stripped FIRST, before the environment blanking: a
+    `\\begin{comment}` that is itself commented out with a leading `%` (a
+    dead marker, not a live environment) must not be treated as opening a
+    real comment block that then swallows real content until the next
+    `\\end{comment}`, live or not.
+    """
+    text = _strip_percent_comments(text)
+
+    def blank_keep_newlines(m: re.Match) -> str:
+        s = m.group(0)
+        return "".join(c if c == "\n" else " " for c in s)
+
+    env_alt = "|".join(VERBATIM_LIKE_ENVS)
+    text = re.sub(
+        r"\\begin\{(?:" + env_alt + r")\}.*?\\end\{(?:" + env_alt + r")\}",
+        blank_keep_newlines,
+        text,
+        flags=re.DOTALL,
+    )
+    return text
 
 
 def find_matching_brace(text: str, open_pos: int) -> int:
@@ -216,23 +236,37 @@ def split_top_level_options(opts: str) -> list[str]:
     return parts
 
 
+_KEY_RE_CACHE: dict[str, re.Pattern] = {}
+
+
 def extract_key(opts: str, key: str) -> Optional[str]:
     """Find `key=...` among top-level options and return its raw value.
     A `{...}`-braced value has the outer braces stripped; a bare value
-    (no braces) runs to the next top-level comma."""
+    (no braces) runs to the next top-level comma.
+
+    Matches keyval/xkeyval semantics on two points that graphicx itself
+    follows: any amount of whitespace is allowed around `=` (`alt  ={x}`
+    is legal), and if a key is given more than once, the LAST occurrence
+    wins (keyval processes options left to right, each assignment
+    overwriting the last)."""
+    pattern = _KEY_RE_CACHE.get(key)
+    if pattern is None:
+        pattern = re.compile(r"^" + re.escape(key) + r"\s*=")
+        _KEY_RE_CACHE[key] = pattern
+    found = None
     for part in split_top_level_options(opts):
         part_stripped = part.strip()
-        if part_stripped.startswith(key + "=") or part_stripped.startswith(key + " ="):
-            eq = part_stripped.index("=")
-            val = part_stripped[eq + 1:].strip()
+        m = pattern.match(part_stripped)
+        if m:
+            val = part_stripped[m.end():].strip()
             if val.startswith("{") and val.endswith("}"):
                 # Only strip if these are a genuinely matching outer pair
                 # (they always are here, since split_top_level_options
                 # only splits on depth-0 commas, so a braced value's
                 # braces are balanced within `part`).
                 val = val[1:-1]
-            return val
-    return None
+            found = val  # last occurrence wins, so keep scanning
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -249,8 +283,11 @@ def iter_tex_files(root: str) -> Iterable[str]:
 
 def find_includegraphics(text: str):
     """Yield (match_start_char_index, opts_text, path_text, opts_start, path_start)
-    for each `\\includegraphics[...]{...}` in text (brace/bracket-aware)."""
-    for m in re.finditer(r"\\includegraphics\b", text):
+    for each `\\includegraphics[...]{...}` in text (brace/bracket-aware).
+    Also matches the starred `\\includegraphics*` form (graphicx allows the
+    star to suppress clipping-to-bounding-box; it doesn't change the
+    alt-text contract)."""
+    for m in re.finditer(r"\\includegraphics(?!\w)\*?", text):
         i = m.end()
         n = len(text)
         # Skip whitespace/newlines between the macro and its arguments --
@@ -275,10 +312,44 @@ def find_includegraphics(text: str):
         yield m.start(), opts, path
 
 
+def find_captions(text: str, start: int, end: int) -> list[tuple[int, str]]:
+    """Find every `\\caption[...]{...}` or `\\caption{...}` between `start`
+    and `end`. Returns a list of (position of the `\\caption`, raw long-form
+    caption text) pairs, in order of appearance. Handles an optional
+    `\\caption[short]{long}` short-title argument (using the long form) and
+    arbitrary whitespace before the braces (`\\caption {...}`)."""
+    out = []
+    for cap_m in re.finditer(r"\\caption\b", text[start:end]):
+        cap_pos = start + cap_m.start()
+        i = start + cap_m.end()
+        n = end
+        while i < n and text[i].isspace():
+            i += 1
+        if i < n and text[i] == "[":
+            close = find_matching_bracket(text, i)
+            if close == -1 or close >= n:
+                continue
+            i = close + 1
+            while i < n and text[i].isspace():
+                i += 1
+        if i >= n or text[i] != "{":
+            continue
+        close = find_matching_brace(text, i)
+        if close == -1 or close > n:
+            continue
+        out.append((cap_pos, text[i + 1:close]))
+    return out
+
+
 def find_enclosing_caption(text: str, pos: int) -> Optional[str]:
-    """Look for the nearest \\caption{...} in the same \\begin{figure}...
-    \\end{figure} environment enclosing position `pos`. Returns raw
-    caption text, or None if not found (or not inside a figure)."""
+    """Look for the \\caption{...} associated with the \\includegraphics at
+    `pos`, within the same \\begin{figure}...\\end{figure} environment.
+    A figure can (rarely, not in this book today) hold more than one
+    \\includegraphics/\\caption pair -- e.g. a multi-panel figure -- so
+    among the captions in the enclosing figure we pick the one that
+    immediately follows `pos` (the usual "image then its caption" layout),
+    falling back to the closest one before `pos` if none follows. Returns
+    raw caption text, or None if not found (or not inside a figure)."""
     fig_start = None
     for m in re.finditer(r"\\begin\{figure\*?\}", text):
         if m.start() <= pos:
@@ -292,36 +363,69 @@ def find_enclosing_caption(text: str, pos: int) -> Optional[str]:
     fig_end = fig_start.end() + end_m.start() if end_m else len(text)
     if pos > fig_end:
         return None  # pos isn't actually inside this figure
-    cap_m = re.search(r"\\caption\{", text[fig_start.end():fig_end])
-    if not cap_m:
+
+    captions = find_captions(text, fig_start.end(), fig_end)
+    if not captions:
         return None
-    cap_open = fig_start.end() + cap_m.end() - 1
-    cap_close = find_matching_brace(text, cap_open)
-    if cap_close == -1:
-        return None
-    return text[cap_open + 1:cap_close]
+    after = [c for c in captions if c[0] >= pos]
+    if after:
+        return min(after, key=lambda c: c[0])[1]
+    return max(captions, key=lambda c: c[0])[1]
 
 
 def line_number_at(text: str, pos: int) -> int:
     return text.count("\n", 0, pos) + 1
 
 
+def _expand_book_order(root: str, relfile: str, visited: set, out: list) -> None:
+    """DFS-expand `relfile`'s own \\input/\\include targets, depth first,
+    in the order they appear, so a chapter file like introc/introc.tex
+    contributes its sub-files (introc/c_memory_model.tex, etc.) in their
+    real book position instead of them falling back to alphabetical order
+    (which is what a flat order.yaml lookup gives them, since order.yaml
+    only lists one file per chapter)."""
+    if relfile in visited:
+        return
+    visited.add(relfile)
+    out.append(relfile)
+    abspath = os.path.join(root, relfile)
+    try:
+        with open(abspath, encoding="utf-8") as f:
+            raw = f.read()
+    except OSError:
+        return
+    text = strip_comments(raw)
+    for m in re.finditer(r"\\(?:input|include)\{([^}]*)\}", text):
+        target = m.group(1).strip()
+        if not target:
+            continue
+        if not target.endswith(".tex"):
+            target += ".tex"
+        _expand_book_order(root, target, visited, out)
+
+
 def load_book_order(root: str) -> list[str]:
     """Read order.yaml (a flat list of `dir/basename` entries, one per
-    line as `- dir/basename`) without requiring PyYAML. Returns the list
-    of `.tex` file relpaths in book order (each entry maps to
-    `entry.tex`)."""
+    line as `- dir/basename`) without requiring PyYAML, then expand each
+    chapter's own \\input/\\include chain (see _expand_book_order) so
+    files pulled in with \\input still land in book order rather than
+    falling back to a sorted-path tiebreak. Returns the list of `.tex`
+    file relpaths in book order."""
     order_path = os.path.join(root, "order.yaml")
-    entries = []
+    chapter_roots = []
     try:
         with open(order_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("- "):
-                    entries.append(line[2:].strip() + ".tex")
+                    chapter_roots.append(line[2:].strip() + ".tex")
     except OSError:
         return []
-    return entries
+    visited: set = set()
+    out: list = []
+    for chapter_root in chapter_roots:
+        _expand_book_order(root, chapter_root, visited, out)
+    return out
 
 
 def scan(root: str) -> list[dict]:
@@ -335,7 +439,9 @@ def scan(root: str) -> list[dict]:
     sorted file path, then by line number within a file.
     """
     results = []
+    tex_file_count = 0
     for relfile in iter_tex_files(root):
+        tex_file_count += 1
         abspath = os.path.join(root, relfile)
         with open(abspath, encoding="utf-8") as f:
             raw = f.read()
@@ -383,6 +489,14 @@ def scan(root: str) -> list[dict]:
                 "_warnings": warnings,
             })
 
+    if tex_file_count == 0:
+        # Scanning zero .tex files "succeeds" vacuously (0 missing out of
+        # 0 figures) unless we say something: that's indistinguishable from
+        # a real pass and would silently no-op the whole gate if --root (or
+        # cwd, for a plain `cd _scripts && python3 alt_lint.py` run) ever
+        # points somewhere that isn't the repo.
+        raise RuntimeError(f"no .tex files found under {root!r}; is --root correct?")
+
     order = load_book_order(root)
     if order:
         order_index = {f: i for i, f in enumerate(order)}
@@ -407,7 +521,11 @@ def main(argv=None) -> int:
     parser.add_argument("--root", default=".", help="repository root to scan (default: cwd)")
     args = parser.parse_args(argv)
 
-    results = scan(args.root)
+    try:
+        results = scan(args.root)
+    except RuntimeError as e:
+        print(f"alt_lint: error: {e}", file=sys.stderr)
+        return 1
 
     failed = [r for r in results if r["_missing_alt"]]
     for r in failed:

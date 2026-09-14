@@ -34,7 +34,8 @@ jobs:
 
     # Python 3.7 has no build for ubuntu-24.04 or 26.04, so setup-python
     # could not find it. 3.11 has builds for 22.04, 24.04 and 26.04, and
-    # works with panflute 1.12.5, which still targets pandoc 2.7's AST.
+    # works with panflute 2.3.1, which matches the pandoc 3.10.2 that
+    # install.sh pins (see the comment there before changing either).
     - name: Setup python
       uses: actions/setup-python@v5
       with:

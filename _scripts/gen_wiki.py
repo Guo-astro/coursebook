@@ -8,6 +8,7 @@ import argparse
 
 import glob
 import os
+import re
 import yaml
 import argparse
 import subprocess
@@ -39,8 +40,9 @@ filter_template = "_scripts/pandoc_header_filter.py"
 prelude_file = 'prelude.tex'
 # Compatibility with github
 github_shim = 'github_redefinitions.tex'
-# Weird glyph that appears regex
-sed_regex = r'0,/\\\[1\\\]\\\[\\\]/{//d;}'
+# The stray "\[1\]" line prelude.tex leaves at the top of each page (see
+# remove_prelude_glyph). pandoc 2.7 followed it with " <span> </span>".
+glyph_regex = re.compile(r'^\\\[1\\\](\s*<span>\s*</span>)?\s*$')
 # Do all ops in the /tmp directory
 tmp_dir = '/tmp/'
 # Cache file directory
@@ -65,24 +67,31 @@ class ConvertableTexFile(object):
         self.md_path = outdir + '/' + self.md_name
 
 # What will show up on the home page
+#
+# Every <img> needs an alt attribute (checked by wiki_check.py). The duck
+# and the two icons next to "One Big PDF"/"One Big EPUB" are decorative:
+# the heading or link text already says everything, so alt="" tells a
+# screen reader to skip them instead of announcing "PDF icon" after
+# "One Big PDF". The per-chapter PDF icon is the only content of its
+# link, so it needs real alt text naming the link's target.
 jinja_templ = """
 # Coursebook
 
 <p align="center">
-    <img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/duck-alpha-cropped.png" width="50%" class="emoji"/>
+    <img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/duck-alpha-cropped.png" alt="" width="50%" class="emoji"/>
 </p>
 
 This coursebook is being built by students and faculty from the University of Illinois. It is based on a crowd-source authoring wikibook experiment by Lawrence Angrave from CS @ Illinois, but is now its own .tex based project. Its source code is located at [the Github link](https://github.com/illinois-cs241/coursebook) which you can find a pdf version of the book as well.
 
 This book is an introduction to programming in C, and system programming (processes, threads, synchronization, networking and more!). We assume you've already had some programming experience, in an earlier computer science course. If you have any typos to report or content to request, feel free to file an issue at the link above. Happy Reading!
 
-<h3 id="one-big-pdf" class="title-text"><a href="https://github.com/illinois-cs241/coursebook/tree/pdf_deploy/main.pdf?raw=true" alt="PDF Version" class="wiki-link">One Big PDF<img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/pdf_icon.png" style="margin-left: 10px;" width="auto" height="50px"> </a></h3>
+<h3 id="one-big-pdf" class="title-text"><a href="https://github.com/illinois-cs241/coursebook/tree/pdf_deploy/main.pdf?raw=true" alt="PDF Version" class="wiki-link">One Big PDF<img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/pdf_icon.png" alt="" style="margin-left: 10px;" width="auto" height="50px"> </a></h3>
 
-<h3 id="one-big-epub" class="title-text"><a href="https://github.com/illinois-cs241/coursebook/tree/epub_deploy/main.epub?raw=true" alt="Epub Versions" class="wiki-link">One Big EPUB<img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/epub_icon.png" style="margin-left: 10px;" width="auto" height="50px"> </a></h3>
+<h3 id="one-big-epub" class="title-text"><a href="https://github.com/illinois-cs241/coursebook/tree/epub_deploy/main.epub?raw=true" alt="Epub Versions" class="wiki-link">One Big EPUB<img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/epub_icon.png" alt="" style="margin-left: 10px;" width="auto" height="50px"> </a></h3>
 
 
 {% for chapter in chapters %}
-## {{loop.index}}. [{{chapter.meta['name']}}](./{{chapter.bare_title}}) [<img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/pdf_icon.png" width="auto" height="50px" />](https://github.com/illinois-cs241/coursebook/blob/pdf_deploy/{{chapter.pdf_path}}) {% for section_name in (chapter.meta['subsections'] or []) %}
+## {{loop.index}}. [{{chapter.meta['name']}}](./{{chapter.bare_title}}) [<img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/pdf_icon.png" alt="PDF of {{chapter.meta['name']|e}}" width="auto" height="50px" />](https://github.com/illinois-cs241/coursebook/blob/pdf_deploy/{{chapter.pdf_path}}) {% for section_name in (chapter.meta['subsections'] or []) %}
 {{loop.index}}. [{{section_name}}](./{{chapter.bare_title}}#{{section_name.lower().replace(' ', '-')}}){% endfor %}
 {% endfor %}
 """
@@ -208,13 +217,18 @@ def convert_latex_to_md(files_m):
                     '-f', # Input format
                     'latex',
                     '-t', # Output format
-                    'gfm+raw_html+autolink_bare_uris-tex_math_dollars',
+                    'gfm+raw_html+autolink_bare_uris-tex_math_dollars-yaml_metadata_block',
                     # Github Flavored Markdown + Add raw HTML + link any bare HTTPS;//
                     # + get mathjax to display correctly
+                    # - no YAML front matter: pandoc 3's gfm writer emits
+                    # one with -s (pandoc 2.7's didn't), and GitHub shows
+                    # it at the top of the page.
                     '-s', # Create a standalone wiki page not a fragment
-                    '--filter',
-                    'pandoc-citeproc', # Filter with citeproc first. It has to be first!
-                    # Otherwise our filter can't process citations
+                    # Citeproc first. It has to be first! pandoc >= 2.11
+                    # runs --citeproc, filters and Lua filters in
+                    # command-line order, and our filter turns the
+                    # citation Links citeproc makes into raw <a> tags.
+                    '--citeproc',
                     '--filter',
                     '_scripts/pandoc_wiki_filter.py', # Give it to our filter
                     '-M', # Add some metadata
@@ -231,9 +245,36 @@ def convert_latex_to_md(files_m):
         logger.info(' '.join(command))
         subprocess.check_call(command)
 
-        # Run this sed command to remove a weird glyph that appears
-        # TODO: Figure out why the glyph appears at all
-        subprocess.check_call(['sed', '-i', sed_regex, md_path])
+        remove_prelude_glyph(md_path)
+
+
+def remove_prelude_glyph(md_path):
+    r"""
+    Remove the stray "\[1\]" line at the top of every page.
+
+    It comes from prelude.tex's \lstnewenvironment{minted}[1]{...}{...}:
+    pandoc's LaTeX reader doesn't know \lstnewenvironment, so it drops the
+    command and its braced arguments but prints the [1] as text. That
+    lands before the chapter's first heading, because prelude.tex is
+    concatenated before every chapter.
+
+    This replaces a GNU-only sed ('0,/\\\[1\\\]\\\[\\\]/{//d;}') that
+    never matched: pandoc 2.7 wrote the line as "\[1\] <span> </span>"
+    and pandoc 3 writes "\[1\]", and neither is "\[1\]\[\]". So the glyph
+    was on the published wiki all along. We match both shapes, and only
+    before the first heading, so nothing in the chapter body is touched.
+    """
+    with open(md_path, encoding='utf-8') as f:
+        lines = f.readlines()
+    for i, line in enumerate(lines):
+        if line.startswith('#'):
+            break
+        if glyph_regex.match(line):
+            del lines[i]
+            with open(md_path, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            return True
+    return False
 
 def main(args):
     """

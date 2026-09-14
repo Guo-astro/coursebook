@@ -8,11 +8,13 @@ plain Markdown, math and links as raw HTML.
 import os.path
 import sys
 
+import html
+
 from panflute import (run_filter, Image, Math, Link, RawInline, Figure,
-                      Para, Emph, stringify)
+                      Para, Emph, CodeBlock, stringify)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from alt_text import apply_alt  # noqa: E402
+from alt_text import apply_alt, fix_code_language  # noqa: E402
 
 base_raw_url = 'https://raw.githubusercontent.com/illinois-cs241/coursebook/master/'
 eps_ext = '.eps'
@@ -58,6 +60,12 @@ def doc_filter(elem, doc):
         # Accessibility by default: raises NoAltTagException if there is
         # neither an alt= key nor a caption.
         apply_alt(elem)
+        # Drop width= and friends: gfm can't express them, so pandoc 3
+        # would write a raw <img> instead of ![alt](url). pandoc 2.7
+        # dropped them too, so the wiki looks the same.
+        elem.identifier = ''
+        elem.classes = []
+        elem.attributes = {}
         # Link to the raw user link instead of relative
         # That way the wiki and the site will have valid links automagically
         new_url = replace_suffix(elem.url, eps_ext, '.png')
@@ -68,6 +76,9 @@ def doc_filter(elem, doc):
 
     if isinstance(elem, Figure):
         return figure_to_markdown(elem)
+
+    if isinstance(elem, CodeBlock):
+        fix_code_language(elem)
 
     if isinstance(elem, Math):
         # Raw inline mathlinks so jekyll renders them
@@ -82,7 +93,16 @@ def doc_filter(elem, doc):
         # There is a script injection possibility here so be careful
 
         url = elem.url
-        title = str(elem.title)
+        if url.startswith('#ref-'):
+            # A citation link made by --citeproc. pandoc 3 puts the whole
+            # rendered citation ("Wikibooks n.d.", "IBM 1958, P. 65")
+            # inside the link, where pandoc 2.7 left the author outside
+            # it. Show that text, or the wiki shows just "(#ref-key)".
+            title = html.escape(stringify(elem).strip())
+        else:
+            # Pre-existing behaviour for ordinary links: the title, else
+            # the URL itself, as the link text.
+            title = str(elem.title)
         if title == "":
             title = elem.url
         link = '<a href="{}">{}</a>'.format(url, title)

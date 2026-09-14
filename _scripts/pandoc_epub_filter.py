@@ -11,10 +11,10 @@ the enclosing figure's caption; see alt_text.py. No alt means no build.
 import os.path
 import sys
 
-from panflute import run_filter, Image
+from panflute import run_filter, Image, CodeBlock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from alt_text import apply_alt, NoAltTagException  # noqa: E402,F401
+from alt_text import apply_alt, fix_code_language, NoAltTagException  # noqa: E402,F401
 
 
 def replace_suffix(content, suffix_old, suffix_new):
@@ -25,6 +25,10 @@ def replace_suffix(content, suffix_old, suffix_new):
 
 
 def doc_filter(elem, doc):
+    if isinstance(elem, CodeBlock):
+        fix_code_language(elem)
+        return elem
+
     if isinstance(elem, Image):
         # Accessibility by default: raises NoAltTagException if there is
         # neither an alt= key nor a caption.
@@ -38,8 +42,17 @@ def doc_filter(elem, doc):
         return elem
 
 
+def finalize(doc):
+    # prelude.tex's \date{} (there for the PDF title) gives an empty date,
+    # which pandoc writes as <dc:date></dc:date>, and EPUBCheck rejects
+    # that (RSC-005). Without a date, pandoc uses the build date.
+    date = doc.get_metadata('date', default=None)
+    if date is not None and not str(date).strip():
+        del doc.metadata['date']
+
+
 def main(doc=None):
-    return run_filter(doc_filter, doc=doc)
+    return run_filter(doc_filter, finalize=finalize, doc=doc)
 
 
 if __name__ == "__main__":

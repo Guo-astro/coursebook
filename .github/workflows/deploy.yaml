@@ -43,7 +43,8 @@ jobs:
 
     # Python 3.7 has no build for ubuntu-24.04 or 26.04, so setup-python
     # could not find it. 3.11 has builds for 22.04, 24.04 and 26.04, and
-    # works with panflute 1.12.5, which still targets pandoc 2.7's AST.
+    # works with panflute 2.3.1, which matches the pandoc 3.10.2 that
+    # install.sh pins (see the comment there before changing either).
     - name: Setup python
       uses: actions/setup-python@v5
       with:
@@ -103,3 +104,34 @@ jobs:
         fi
 
         bash _scripts/deploy.sh
+
+    # Post-deploy smoke checks (issue #238, gates A2 and A3), run against
+    # what readers now get, not the local build. script.sh already ran the
+    # same checks on the local build before deploying; this catches a
+    # deploy that published something else. A failure here means master
+    # is live with a broken EPUB or wiki: revert the offending commit.
+    #
+    # deploy.sh leaves the EPUB job's workspace on the orphaned
+    # epub_deploy branch with the sources deleted, so check out this
+    # commit's sources again, to one side, for the check scripts.
+    - name: Checkout sources for the smoke checks
+      if: matrix.build_focus != 'PDF'
+      uses: actions/checkout@v4
+      with:
+        path: smoke-src
+
+    - name: Smoke-check the deployed EPUB
+      if: matrix.build_focus == 'EPUB'
+      run: |
+        git -C smoke-src fetch --depth=1 origin epub_deploy
+        git -C smoke-src show FETCH_HEAD:main.epub > "$RUNNER_TEMP/deployed.epub"
+        python3 smoke-src/_scripts/epub_check.py "$RUNNER_TEMP/deployed.epub" --root smoke-src
+        java -jar ~/epubcheck/epubcheck.jar --failonwarnings "$RUNNER_TEMP/deployed.epub"
+
+    - name: Smoke-check the deployed wiki
+      if: matrix.build_focus == 'WIKI'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git clone --depth=1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" "$RUNNER_TEMP/deployed-wiki"
+        python3 smoke-src/_scripts/wiki_check.py "$RUNNER_TEMP/deployed-wiki" --root smoke-src

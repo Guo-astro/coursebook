@@ -33,8 +33,16 @@ debug: $(PDF_TEX)-debug
 .PHONY: epub
 epub: $(MAIN_EPUB)
 
-$(MAIN_EPUB): $(ORDER_TEX) $(MAIN_TEX_SOURCE)
-	pandoc --toc -s -f latex -t epub --filter pandoc-citeproc --filter _scripts/pandoc_epub_filter.py -M link-citations=true --epub-cover-image _images/cover.png -M author="B. Venkatesh, L. Angrave, et Al." -o $(MAIN_EPUB) $(MAIN_TEX_SOURCE);
+# Needs pandoc >= 3.1.12 (see _scripts/install.sh). --citeproc must come
+# before the filter: pandoc 3 runs citeproc and filters in command-line
+# order. --mathml is explicit because pandoc 3.10's EPUB writer otherwise
+# leaves \frac and \sum\limits formulas as raw TeX (25 of the book's 248).
+# epub_cover_alt.py gives the generated cover page alt text, which pandoc
+# has no option for.
+$(MAIN_EPUB): $(ORDER_TEX) $(MAIN_TEX_SOURCE) _scripts/epub_metadata.yaml _scripts/epub_redefinitions.tex \
+		_images/cover.png _scripts/pandoc_epub_filter.py _scripts/alt_text.py _scripts/epub_cover_alt.py
+	pandoc --toc -s -f latex -t epub --mathml --citeproc --filter _scripts/pandoc_epub_filter.py --metadata-file _scripts/epub_metadata.yaml -M link-citations=true --epub-cover-image _images/cover.png -M author="B. Venkatesh, L. Angrave, et Al." -o $(MAIN_EPUB) _scripts/epub_redefinitions.tex $(MAIN_TEX_SOURCE)
+	python3 _scripts/epub_cover_alt.py $(MAIN_EPUB)
 
 $(ORDER_TEX): $(ORDER_TEX_DEP)
 	python3 _scripts/gen_order.py $^ > $@

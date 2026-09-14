@@ -53,7 +53,11 @@ unchanged.
 * `make pdf TAGGED=1` (also `chapters`, `debug`, single chapter PDFs) goes
   through `main_tagged.tex`, which puts `\DocumentMetadata` first and then
   `\input`s `main_wrapper.tex`. Tagged targets depend on a `FORCE` target
-  so switching modes never reuses a PDF built in the other mode.
+  and their PDFs are backdated to 1970, so switching modes in either
+  direction never reuses the other mode's PDF. (The `debug` recipe is
+  untouched and keeps its existing quirks: it runs pdfLaTeX, not
+  LuaLaTeX, and its `mv $(PDF_TEX)-debug` names a file latexmk never
+  writes. `TAGGED=1` inherits both.)
 * **Default build unchanged:** `make -n -B pdf debug` prints the same 134
   lines on master and on this branch; a full TL2023 build of master and of
   this branch gives the same 392 pages, identical `pdftotext` output and
@@ -88,7 +92,7 @@ MathML).
 | titlesec easy forms (`\titleformat*`, `\titlespacing*`) | 8 calls | currently-incompatible | 11 TeX errors, fatal | give titlesec full `\titleformat`s (book defaults) when it loads | **0** |
 | `proof` environment (prelude.tex) | 4 | — | "Command \proof already defined" (latex-lab block module) | `\let\proof\relax` before the prelude | **0** |
 | framed `shaded*` (proof boxes) | 2 | currently-incompatible | 0 | none needed | 0 |
-| mdframed | **0 (loaded, unused)** | no-support | 2 errors | a `/Div` wrapper crashes the PDF backend | not needed |
+| mdframed | **0 (loaded, unused)** | no-support | 2 errors *when used*; loading it unused costs nothing (the full book, which loads it, has 0 errors) | a `/Div` wrapper crashes the PDF backend | not needed |
 | wrapfig | **0 (loaded, unused)** | currently-incompatible | 0 | — | 0 |
 | fncychap `[Bjornstrup]` | every chapter | currently-incompatible | 0 errors, **but the style is silently dropped** (see below) | — | — |
 | float `[H]` + figure + `alt` | 46 | currently-incompatible | 0 (firstaid patches `[H]`) | — | 0 |
@@ -233,6 +237,40 @@ package.
 
 3a, by contrast, is done: what is left from the list above is items 1–2
 (minutes), deciding on 4–5, and the CI move in 8.
+
+## Adversarial review
+
+GLM (`lumen/glm-5.3-flash` via opencode) reviewed the diff. Every finding
+was checked against the code and the measurements.
+
+Accepted and fixed:
+
+1. A plain `make` after `make TAGGED=1` kept the tagged `main.pdf` (FORCE
+   only covered untagged → tagged). Tagged outputs are now backdated.
+2. The duck check failed on chapter PDFs, which have no title page; it now
+   skips a page with no images.
+3. `compare_pdf_text.sh` said OK when poppler was missing or the PDFs were
+   unreadable; it now checks tools, page counts, non-empty text, and that
+   the first PDF is untagged and the second tagged.
+4. `verapdf_summary.py` crashed on a `null` `validationResult`.
+5. `tee` without `pipefail` hid step failures; both CI jobs now use
+   `shell: bash` (`-eo pipefail`).
+6. The build step could stop before writing its summary when no PDF was
+   produced; copies and counts are guarded.
+7. The comment on Form XObjects claimed more than the code did; forms are
+   now labelled as opaque.
+8. `check_pdf_tags.py` used a private pikepdf attribute and crashed on an
+   `/MCR` without `/MCID`; it also now resolves named `/Properties`.
+10. The untagged PDF is now asserted to be untagged before B4a.
+11. The mdframed row was unclear about loaded-but-unused.
+
+Rejected:
+
+9. "Hard-fail B2 when `_scripts/alt_lint.py` is missing." It comes from
+   Part C on another branch, and the task is to accept a JSON file until
+   then; CI now emits a warning instead of failing.
+
+<!-- REVIEW-MORE -->
 
 ## How to reproduce
 

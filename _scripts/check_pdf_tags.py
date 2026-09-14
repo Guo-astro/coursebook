@@ -119,15 +119,29 @@ def mcids_of(elem):
     items = list(kids) if isinstance(kids, pikepdf.Array) else [kids]
     pg = elem.get("/Pg")
     for k in items:
-        if isinstance(k, int) or (isinstance(k, pikepdf.Object)
-                                  and k._type_code == pikepdf.ObjectType.integer):
+        if isinstance(k, int):  # pikepdf returns PDF integers as int
             if pg is not None:
-                out.append((pg.objgen, int(k)))
-        elif isinstance(k, pikepdf.Dictionary) and k.get("/Type") == "/MCR":
+                out.append((pg.objgen, k))
+        elif (isinstance(k, pikepdf.Dictionary) and k.get("/Type") == "/MCR"
+              and "/MCID" in k):
             p = k.get("/Pg", pg)
             if p is not None:
                 out.append((p.objgen, int(k.MCID)))
     return out
+
+
+def bdc_mcid(page, operands):
+    """MCID of a BDC operator, whose properties may be an inline dictionary
+    or a name looked up in the page's /Properties resources."""
+    if len(operands) < 2:
+        return None
+    props = operands[1]
+    if isinstance(props, pikepdf.Name):
+        res = page.obj.get("/Resources", {})
+        props = res.get("/Properties", {}).get(str(props))
+    if isinstance(props, pikepdf.Dictionary) and "/MCID" in props:
+        return int(props.MCID)
+    return None
 
 
 def images_by_mcid(pdf):
@@ -147,11 +161,7 @@ def images_by_mcid(pdf):
             op = str(op)
             if op in ("BDC", "BMC"):
                 tag = str(operands[0])
-                mcid = None
-                if op == "BDC" and len(operands) > 1:
-                    props = operands[1]
-                    if isinstance(props, pikepdf.Dictionary) and "/MCID" in props:
-                        mcid = int(props.MCID)
+                mcid = bdc_mcid(page, operands) if op == "BDC" else None
                 if tag == "/Artifact":
                     stack.append(("artifact",))
                 elif mcid is not None:
@@ -164,10 +174,11 @@ def images_by_mcid(pdf):
             elif op == "Do":
                 name = str(operands[0])
                 xo = xobjs.get(name)
-                if xo is None or xo.get("/Subtype") != "/Image":
-                    # Form XObjects wrap included PDFs/EPS; count them too.
-                    if xo is None:
-                        continue
+                if xo is None:
+                    continue
+                # Form XObjects (the book's converted EPS drawings) are
+                # recorded as opaque "form" entries; images nested inside
+                # them are not inspected.
                 label = image_label(xo, name)
                 inner = next((s for s in reversed(stack)
                               if s[0] in ("mcid", "artifact")), None)
@@ -183,6 +194,8 @@ def images_by_mcid(pdf):
 def image_label(xo, name):
     """Best-effort identification: size of the image; the duck is the only
     PNG with an SMask (alpha) on the title page."""
+    if xo.get("/Subtype") != "/Image":
+        return f"{name}:form"
     w = xo.get("/Width")
     h = xo.get("/Height")
     smask = "/SMask" in xo
@@ -277,9 +290,13 @@ def main(argv=None):
             failures.append(f"title page (page {args.duck_page}) has a /Figure: "
                             f"{duck_figs}")
         duck_page = pdf.pages[args.duck_page - 1]
-        page_loose = [l for l in images_on_page(pdf, duck_page, loose)]
-        print(f"title page images outside structure: {page_loose}")
-        if not any(kind == "artifact" for kind, _ in page_loose):
+        page_imgs = images_on_page(duck_page)
+        print(f"title page images: {page_imgs}")
+        if not page_imgs:
+            # e.g. a chapter PDF: there is no title page to check.
+            print(f"note: no images on page {args.duck_page}; duck check skipped "
+                  "(use --duck-page 0 for chapter PDFs)")
+        elif not any(kind == "artifact" for kind, _ in page_imgs):
             failures.append("title-page duck is not drawn inside an /Artifact")
 
     print("Structure element counts (standard role):")
@@ -308,8 +325,9 @@ def main(argv=None):
     return finish(failures, args, {"figures": fig_info, "counts": dict(counts)})
 
 
-def images_on_page(pdf, page, loose):
-    """Re-scan one page and return (kind, label) for images outside MCIDs."""
+def images_on_page(page):
+    """Scan one page; return (kind, label) for every XObject drawn, where
+    kind is "mcid" (tagged content), "artifact" or "untagged"."""
     out = []
     xobjs = page.Resources.get("/XObject", {}) if "/Resources" in page else {}
     stack = []
@@ -317,9 +335,7 @@ def images_on_page(pdf, page, loose):
         op = str(op)
         if op in ("BDC", "BMC"):
             tag = str(operands[0])
-            has_mcid = (op == "BDC" and len(operands) > 1
-                        and isinstance(operands[1], pikepdf.Dictionary)
-                        and "/MCID" in operands[1])
+            has_mcid = op == "BDC" and bdc_mcid(page, operands) is not None
             stack.append("artifact" if tag == "/Artifact"
                          else "mcid" if has_mcid else "other")
         elif op == "EMC" and stack:
@@ -330,8 +346,7 @@ def images_on_page(pdf, page, loose):
             if xo is None:
                 continue
             inner = next((s for s in reversed(stack) if s != "other"), None)
-            if inner != "mcid":
-                out.append((inner or "untagged", image_label(xo, name)))
+            out.append((inner or "untagged", image_label(xo, name)))
     return out
 
 

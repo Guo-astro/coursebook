@@ -4,11 +4,14 @@ MAIN_TEX=main_wrapper.tex
 # `make pdf TAGGED=1` (also chapters, debug) builds a tagged PDF through
 # main_tagged.tex, which prepends \DocumentMetadata. Experimental, see
 # docs/pdf-tagging-spike.md. Without TAGGED nothing below changes. Tagged
-# builds always rerun (FORCE), so switching modes never reuses a PDF built
-# in the other mode.
+# builds always rerun (FORCE), and their PDFs are backdated to 1970 so a
+# later plain `make` rebuilds them rather than keeping a tagged PDF as
+# up to date; either way round, switching modes never reuses the other
+# mode's PDF.
 ifeq ($(TAGGED),1)
 MAIN_TEX=main_tagged.tex
 TAGGED_FORCE=FORCE
+TAGGED_BACKDATE=touch -t 197001010000
 endif
 MAIN_TEX_SOURCE=main.tex
 PDF_TEX=$(patsubst %.tex,%.pdf,$(MAIN_TEX))
@@ -65,6 +68,7 @@ $(CHAPTER_PDF): %.pdf: %.tex $(ORDER_TEX) $(TAGGED_FORCE)
 	@latexmk -interaction=nonstopmode -quiet -pdflatex=lualatex -pdf -jobname="$@" $@.tmp \
 		|| { echo "*** latexmk failed for $@"; grep -n -A3 '^! ' $@.log 2>/dev/null; rm -f $@.tmp; false; }
 	@mv $@.pdf $@
+	$(if $(TAGGED_BACKDATE),@$(TAGGED_BACKDATE) $@)
 	@ls $@ > /dev/null
 	-@rm $@.tmp
 
@@ -73,11 +77,13 @@ $(MAIN_OUT): $(TEX) $(MAIN_TEX) $(BIBS) Makefile $(ORDER_TEX) $(TAGGED_FORCE)
 		|| { echo "*** latexmk failed"; grep -n -A3 '^! ' $(basename $(MAIN_TEX)).log 2>/dev/null; false; }
 	@ls $(PDF_TEX) > /dev/null
 	@mv $(PDF_TEX) $(MAIN_OUT)
+	$(if $(TAGGED_BACKDATE),@$(TAGGED_BACKDATE) $(MAIN_OUT))
 	@echo "Finished"
 
 $(PDF_TEX)-debug: $(TEX) $(MAIN_TEX) $(BIBS) Makefile $(TAGGED_FORCE)
 	-@latexmk -interaction=nonstopmode -f -pdf $(MAIN_TEX) > latexmk.out
 	@mv $(PDF_TEX)-debug $(MAIN_OUT)
+	$(if $(TAGGED_BACKDATE),@$(TAGGED_BACKDATE) $(MAIN_OUT))
 
 .PHONY: FORCE
 FORCE:

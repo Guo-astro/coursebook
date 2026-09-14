@@ -15,14 +15,15 @@ FIGURE_WORDS = ("figure", " alt ", "alternate description", "alt entry",
 
 
 def rules(report):
-    jobs = report.get("report", {}).get("jobs", [])
+    jobs = (report.get("report") or {}).get("jobs") or []
     for job in jobs:
-        vr = job.get("validationResult", [])
+        # null when veraPDF could not parse or validate the file
+        vr = job.get("validationResult") or []
         if isinstance(vr, dict):
             vr = [vr]
         for res in vr:
-            details = res.get("details", {})
-            yield res, details, details.get("ruleSummaries", [])
+            details = res.get("details") or {}
+            yield res, details, details.get("ruleSummaries") or []
 
 
 def is_figure_rule(r):

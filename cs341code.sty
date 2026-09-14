@@ -117,13 +117,20 @@
   \lowercase{\endgroup\def~{\leavevmode\kern\z@\char`#1\penalty9999\relax}}}
 
 % The grey box: framed, so that a long block can break across pages.
-% Its right margin is 1.5cm too; the colour sits .5em (5.4pt) outside
-% the text on each side, as with listings' frame margins.
+% Like listings (xleftmargin, xrightmargin), the text sits 1.5cm inside
+% the current line on both sides -- in a list item, inside the item's
+% indentation -- and the colour .5em (5.4pt) outside the text. The box
+% is placed by \@totalleftmargin, as framed's own shaded box is, and
+% inside it nothing indents again: the kernel verbatim would add the list
+% indentation as \leftskip, latex-lab's block as \parshape. framed sets
+% the frame with \centerline, so the frame is exactly \columnwidth wide
+% (as framed's own frames are), or it would be centred, not placed.
 \def\cs@code@frame{\par\addvspace{\cs@code@skip}%
-  \def\FrameCommand##1{\hbox{\hskip\dimexpr\cs@code@margin-\cs@code@pad\relax
-    \fboxsep\cs@code@pad\colorbox{shadecolor}{##1}}}%
-  \MakeFramed{\advance\hsize-\width
-    \advance\hsize-\dimexpr\cs@code@margin-\cs@code@pad\relax\FrameRestore}}
+  \def\FrameCommand##1{\hbox to\columnwidth{\hskip\@totalleftmargin
+    \hskip\dimexpr\cs@code@margin-\cs@code@pad\relax
+    \fboxsep\cs@code@pad\colorbox{shadecolor}{##1}\hss}}%
+  \MakeFramed{\hsize\dimexpr\linewidth-2\cs@code@margin\relax
+    \FrameRestore\@totalleftmargin\z@\linewidth\hsize\parshape\z@}}
 \def\cs@code@endframe{\endMakeFramed\par\addvspace{\cs@code@skip}}
 
 \ifdefined\SimpleBlockEnv

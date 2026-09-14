@@ -187,6 +187,35 @@ To make sure the book has a consistent tone among authors, we'll use the general
     * "Programmers love readable code. They edit that code quickly."
     * "The banker keeps track of the number of resources. She makes a list of resources"
 
+# Accessibility
+
+Every content figure's `\includegraphics` must carry a non-empty `alt={...}`
+key describing what the figure shows (see issue #238). CI runs
+`_scripts/alt_lint.py`, which fails the build if any figure is missing alt
+text, and warns (without failing) if an alt text is just the caption
+repeated, a generic word like "diagram", or contains a LaTeX macro that
+won't render sensibly outside a formatted document.
+
+That lint only proves alt text *arrived* -- it can't tell whether the words
+you wrote are actually correct or useful. So **any PR that adds or changes
+an `alt=` value, or adds/changes a figure, must include a rendered list of
+the changed alt texts next to their figures**, so a human reviewer can check
+the words against the picture. The lint's own `--json` output is the
+easiest way to produce that list; filter it to the files your PR touched,
+for example:
+
+```
+python3 _scripts/alt_lint.py --json | jq '.[] | select(.file == "malloc/malloc.tex")'
+```
+
+(swap in the files your PR actually touched, or drop the `select` to list
+everything). If `jq` isn't installed, `python3 _scripts/alt_lint.py --json`
+alone dumps every content figure's file, line, path, alt text and caption
+as JSON to filter by hand.
+
+(swap in the files your PR actually changed), and paste the figures plus
+this list into the PR description.
+
 # Code Style
 
 * Opt for small snippets of code and explainations around them. We want people who are learning to craft their own functions.

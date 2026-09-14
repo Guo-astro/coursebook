@@ -1,83 +1,21 @@
-% Opt-in tagged (accessible) PDF build: `make pdf TAGGED=1`.
-% Experimental. See docs/pdf-tagging-spike.md and issue #238, Part B.
+% The tagged (accessible) PDF, which is what `make pdf` builds (issue
+% #238, Part B). `make pdf TAGGED=0` builds main_wrapper.tex instead, the
+% same book without \DocumentMetadata, for debugging.
 %
 % \DocumentMetadata has to come before \documentclass, so this file wraps
-% main_wrapper.tex rather than editing it; the default build never reads
-% this file. Key names checked against TeX Live 2026 (latex-lab
-% 2026-06-08): testphase=phase-III still exists and implies tagging=on,
-% and firstaid is still a valid module. Key names have changed between
-% releases, so re-check documentmetadata-support.ltx when the pinned
-% release moves.
+% main_wrapper.tex rather than editing it. Key names checked against TeX
+% Live 2026 (latex-lab 2026-06-08, documentmetadata-support.ltx):
+% testphase=phase-III implies tagging=on, firstaid is still a module.
+% They have changed between releases, so re-check them when the pinned
+% TeX Live in .github/workflows moves.
+%
+% No package needs containment hooks here any more: the ones the tagging
+% code does not support were replaced (see cs341code.sty, cs341book.sty
+% and docs/pdf-tagging-spike.md).
 \DocumentMetadata{
   lang=en-US,
   pdfversion=2.0,
+  pdfstandard=ua-2,
   testphase={phase-III,firstaid},
 }
-
-% ---------------------------------------------------------------------------
-% Containment for packages the tagging code does not support yet (option 3a
-% of #238). None of this changes the untagged build, and none of it
-% replaces a package. Each block is measured in docs/pdf-tagging-spike.md.
-% ---------------------------------------------------------------------------
-
-% With \DocumentMetadata the class option hidelinks no longer reaches
-% hyperref (links got coloured boxes); set it explicitly.
-\AddToHook{package/hyperref/after}{\hypersetup{hidelinks}}
-
-% latex-lab's block module defines a proof environment; prelude.tex
-% \newenvironment{proof} would then fail with "already defined".
-\AddToHook{class/after}{\let\proof\relax\let\endproof\relax}
-
-% titlesec: with tagging on, latex-lab redefines \section & co., so
-% titlesec's extraction sees "non standard sectioning commands" and the
-% easy \titleformat* / \titlespacing* calls in main.tex fail. Give titlesec
-% full formats (the book class defaults) as soon as it loads; main.tex's
-% own \titleformat* and \titlespacing* then apply on top as usual.
-\AddToHook{package/titlesec/after}{%
-  \titleformat{\section}{\normalfont\Large\bfseries}{\thesection}{1em}{}%
-  \titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection}{1em}{}%
-  \titleformat{\subsubsection}{\normalfont\normalsize\bfseries}{\thesubsubsection}{1em}{}%
-  \titleformat{\paragraph}[runin]{\normalfont\normalsize\bfseries}{\theparagraph}{1em}{}%
-  \titleformat{\subparagraph}[runin]{\normalfont\normalsize\bfseries}{\thesubparagraph}{1em}{}%
-  \titlespacing*{\section}{0pt}{3.5ex plus 1ex minus .2ex}{2.3ex plus .2ex}%
-  \titlespacing*{\subsection}{0pt}{3.25ex plus 1ex minus .2ex}{1.5ex plus .2ex}%
-  \titlespacing*{\subsubsection}{0pt}{3.25ex plus 1ex minus .2ex}{1.5ex plus .2ex}%
-  \titlespacing*{\paragraph}{0pt}{3.25ex plus 1ex minus .2ex}{1em}%
-  \titlespacing*{\subparagraph}{\parindent}{3.25ex plus 1ex minus .2ex}{1em}%
-}
-
-% listings (lstlisting, \lstinputlisting, and the minted emulation in
-% prelude.tex): listings sets every code line as its own paragraph and
-% ends with \@doendpe, and the minted emulation leaves TeX in horizontal
-% mode (\noindent\minipage); both unbalance tagpdf's paragraph hooks
-% ("text-unit para hooks differ"). Contain each listing as ONE /Code
-% structure element with a single marked content and paragraph tagging
-% off inside; end the paragraph while tagging is still off, then switch
-% it back on and clear the pending \@doendpe. The code stays real,
-% readable text (not an artifact); it just has no per-line structure.
-% Cost: text that continues a paragraph straight after a listing (no
-% blank line) is indented in the tagged build only.
-\makeatletter
-\def\cb@tag@code@begin{\par\tagpdfsetup{para/tagging=false}%
-  \tagstructbegin{tag=Code}\tagmcbegin{}}
-\def\cb@tag@code@end{\par\tagmcend\tagstructend
-  \tagpdfsetup{para/tagging=true}\@endpefalse\everypar{}}
-\AddToHook{env/lstlisting/before}{\cb@tag@code@begin}
-\AddToHook{env/lstlisting/after}{\cb@tag@code@end}
-\AddToHook{env/minted/before}{\cb@tag@code@begin}
-\AddToHook{env/minted/after}{\cb@tag@code@end}
-% \lstinputlisting reads its arguments with changed catcodes, so hook the
-% internal \lst@InputListing (inside listings' own group, which restores
-% the para setting); the \@doendpe it queues for later is dropped.
-\AddToHook{cmd/lst@InputListing/before}{\cb@tag@code@begin}
-\AddToHook{cmd/lst@InputListing/after}{\par\tagmcend\tagstructend
-  \global\let\lst@doendpe\@empty}
-\makeatother
-
-% epigraph (redefined in prelude.tex to use a minipage) loses a paragraph
-% end. Tag each epigraph as one /BlockQuote.
-\AddToHook{cmd/epigraph/before}{\par\begingroup\tagpdfsetup{para/tagging=false}%
-  \tagstructbegin{tag=BlockQuote}\tagmcbegin{}}
-\AddToHook{cmd/epigraph/after}{\tagmcend\tagstructend\endgroup\par}
-
 \input{main_wrapper.tex}

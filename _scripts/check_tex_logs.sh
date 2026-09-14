@@ -20,6 +20,8 @@ if [ ${#logs[@]} -eq 0 ]; then
   for d in $(sed 's/^- //; s/\r$//' order.yaml); do logs+=("$d.pdf.log"); done
 fi
 
+if [ ${#logs[@]} -eq 0 ]; then echo "FAIL: no logs to check (run make pdf first)"; exit 1; fi
+
 status=0
 printf '%-36s %6s %7s %8s %8s %8s\n' log TeXerr tagErr tagWarn missing overfull
 for log in "${logs[@]}"; do

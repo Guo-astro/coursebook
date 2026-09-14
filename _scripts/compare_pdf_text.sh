@@ -11,8 +11,8 @@
 # What is compared: pdftotext's words, with a hyphen at the end of a line
 # joined to the next line, as a multiset (order ignored). Two things
 # differ between the two PDFs that are not content:
-#  * order: pdftotext follows the structure tree of a tagged PDF, so page
-#    numbers, running heads and figure labels come out in other places;
+#  * order: pdftotext puts some text of the tagged PDF (page numbers,
+#    running heads, figure labels) in other places;
 #  * line-end hyphens: pdftotext rejoins "argu-" / "ments:" in the tagged
 #    PDF (tagging marks where a line was broken) but not in the untagged.
 # The in-order diff is still written and counted, for review.

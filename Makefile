@@ -16,7 +16,6 @@ endif
 # The PDFs depend on this stamp, which changes only when TAGGED does, so
 # switching modes rebuilds them instead of keeping the other mode's PDF.
 PDF_MODE=.pdf-mode
-$(shell echo "$(TAGGED)" | cmp -s - $(PDF_MODE) || echo "$(TAGGED)" > $(PDF_MODE))
 # Every PDF, the chapter PDFs included, also depends on the preamble.
 PREAMBLE=main.tex main_wrapper.tex main_tagged.tex prelude.tex title.tex glossary.tex \
 	cs341code.sty cs341book.sty $(PDF_MODE)
@@ -86,10 +85,21 @@ $(MAIN_OUT): $(TEX) $(PREAMBLE) $(BIBS) Makefile $(ORDER_TEX)
 	@mv $(PDF_TEX) $(MAIN_OUT)
 	@echo "Finished"
 
+# The stamp's recipe runs every time (FORCE) but rewrites the file only when
+# TAGGED differs from the last build's, so only then are the PDFs out of
+# date. (A rule, not a $(shell) at parse time, so that make -n or make
+# clean does not touch it.)
+$(PDF_MODE): FORCE
+	@echo "$(TAGGED)" | cmp -s - $@ || echo "$(TAGGED)" > $@
+
+.PHONY: FORCE
+FORCE:
+
 # Like $(MAIN_OUT), but carries on past TeX errors (latexmk -f) and keeps
 # its output in latexmk.out, to see how far a broken build gets. Same
 # engine as the real build.
 $(MAIN_OUT)-debug: $(TEX) $(PREAMBLE) $(BIBS) Makefile $(ORDER_TEX)
+	-@rm -f $(PDF_TEX)
 	-@latexmk -pdflatex=lualatex -interaction=nonstopmode -f -pdf $(MAIN_TEX) > latexmk.out
 	@test -f $(PDF_TEX) && mv $(PDF_TEX) $(MAIN_OUT) || { echo "*** no PDF; see latexmk.out"; false; }
 

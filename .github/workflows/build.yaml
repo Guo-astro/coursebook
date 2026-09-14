@@ -296,11 +296,13 @@ jobs:
     # luaotfload's cache of the OpenType fonts. A fresh container builds it
     # on the first run, which costs time in every job; it only changes with
     # the image or the fonts cs341book.sty loads.
+    # The key follows the image pin (in the two workflow files) and the
+    # fonts the packages load.
     - name: Cache LuaTeX fonts
       uses: actions/cache@v4
       with:
         path: /usr/local/texlive/2026/texmf-var/luatex-cache
-        key: luatex-cache-1a1b8588-${{ hashFiles('cs341book.sty', 'cs341code.sty') }}
+        key: luatex-cache-${{ hashFiles('.github/workflows/build.yaml', '.github/workflows/deploy.yaml', 'cs341book.sty', 'cs341code.sty') }}
 
     - name: Install
       run: |
@@ -312,16 +314,31 @@ jobs:
         bash _scripts/script.sh
         echo "make pdf, B1 and B2: $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
 
+    # The same sources built untagged: every PDF (main book and chapters)
+    # must have the same pages and words as its tagged build. B1 also runs
+    # on the untagged logs. The tagged PDFs are put back afterwards.
     - name: B4a tagged vs untagged
       run: |
         start=$(date +%s)
-        cp main.pdf main-tagged.pdf
-        make TAGGED=0 main.pdf
-        mv main.pdf main-untagged.pdf
-        cp main-tagged.pdf main.pdf
-        bash _scripts/compare_pdf_text.sh main-untagged.pdf main-tagged.pdf b4a \
-          | tee -a "$GITHUB_STEP_SUMMARY"
-        echo "B4a (untagged build and comparison): $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
+        chapters=$(sed 's/^- //; s/\r$//' order.yaml)
+        mkdir -p tagged
+        cp main.pdf tagged/main.pdf
+        for c in $chapters; do mkdir -p "tagged/$(dirname "$c")"; cp "$c.pdf" "tagged/$c.pdf"; done
+        make TAGGED=0 pdf
+        bash _scripts/check_tex_logs.sh
+        cp main.pdf main-untagged.pdf
+        status=0
+        bash _scripts/compare_pdf_text.sh main.pdf tagged/main.pdf b4a/main \
+          | tee -a "$GITHUB_STEP_SUMMARY" || status=1
+        for c in $chapters; do
+          if ! bash _scripts/compare_pdf_text.sh "$c.pdf" "tagged/$c.pdf" "b4a/$(basename "$c")" > b4a-chapter.txt; then
+            status=1; echo "B4a failed for $c.pdf:" | tee -a "$GITHUB_STEP_SUMMARY"; cat b4a-chapter.txt
+          fi
+        done
+        cp tagged/main.pdf main.pdf
+        for c in $chapters; do cp "tagged/$c.pdf" "$c.pdf"; done
+        echo "B4a (untagged build and comparisons): $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
+        exit $status
 
     - name: Upload PDFs, logs and reports
       if: always()

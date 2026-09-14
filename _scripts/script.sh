@@ -34,6 +34,7 @@ else
     # text of its alt= key (the list comes from the alt-text lint, C1);
     # the title-page duck is an artifact. Then each chapter PDF, which
     # holds only its own figures and has no title page.
+    python3 -m unittest _scripts.test_check_pdf_tags -v
     python3 _scripts/alt_lint.py --json > alt-expected.json
     python3 _scripts/check_pdf_tags.py main.pdf --expected alt-expected.json --json-out b2.json
     for chapter in $(sed 's/^- //; s/\r$//' order.yaml); do

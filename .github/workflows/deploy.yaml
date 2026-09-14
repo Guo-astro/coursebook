@@ -163,7 +163,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: /usr/local/texlive/2026/texmf-var/luatex-cache
-        key: luatex-cache-1a1b8588-${{ hashFiles('cs341book.sty', 'cs341code.sty') }}
+        key: luatex-cache-${{ hashFiles('.github/workflows/build.yaml', '.github/workflows/deploy.yaml', 'cs341book.sty', 'cs341code.sty') }}
 
     - name: Install
       run: |
@@ -172,6 +172,16 @@ jobs:
     - name: Build coursebook
       run: |
         bash _scripts/script.sh
+
+    - name: Upload the logs if the build failed
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pdf-deploy-logs
+        path: |
+          main_tagged.log
+          */*.pdf.log
+        if-no-files-found: warn
 
     - name: Deploy the PDFs
       env:

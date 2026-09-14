@@ -41,6 +41,7 @@ def norm(text):
 # through as typed ("\\textbackslash 0", ``quotes'', --) then fails to
 # match, so an escape leak is a failure, not a pass.
 _LATEX_ESCAPES = [
+    (r"(?<!\\)~", " "),  # a tie; before \textasciitilde, which yields ~
     (r"\\textbackslash\s*(\{\})?", "\\\\"),
     (r"\\textasciitilde\s*(\{\})?", "~"),
     (r"\\textasciicircum\s*(\{\})?", "^"),
@@ -48,7 +49,6 @@ _LATEX_ESCAPES = [
     (r"\\(?:emph|textit|textbf|texttt|textsf|textrm)\{([^{}]*)\}", r"\1"),
     (r"\\([_%&#$])", r"\1"),
     (r"\\[{}]", lambda m: m.group()[1]),
-    (r"(?<!\\)~", " "),
     (r"``", "\u201c"),
     (r"''", "\u201d"),
     (r"---", "\u2014"),

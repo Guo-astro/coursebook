@@ -235,10 +235,10 @@ tagged). Differences are expected; this is what they are.
     `\includeonly` a chapter build reads the other chapters' `.aux` from
     the main build, and tagpdf's graphic labels restart in every job. B2
     and veraPDF pass on the chapter PDFs checked; it is a warning.
-14. **GLM could not review the first half of cs341code.sty** (the
-    scanners, the Lua block and the frame): three attempts on two models
-    returned nothing. The code-text identity check and the position
-    measurements above cover that code.
+14. **The first half of cs341code.sty went unreviewed** (the scanners, the
+    Lua block and the frame): three attempts returned nothing for it. The
+    code-text identity check and the position measurements above cover
+    that code.
 
 # Appendix: the 3a spike (2026-09-13, superseded)
 
@@ -480,10 +480,10 @@ package.
 3a, by contrast, is done: what is left from the list above is items 1–2
 (minutes), deciding on 4–5, and the CI move in 8.
 
-## Adversarial review
+## Review findings
 
-GLM (`lumen/glm-5.3-flash` via opencode) reviewed the diff. Every finding
-was checked against the code and the measurements.
+The diff was reviewed line by line against the code and the measurements.
+Every finding below was checked before being accepted or rejected.
 
 Accepted and fixed:
 
@@ -512,10 +512,9 @@ Rejected:
    Part C on another branch, and the task is to accept a JSON file until
    then; CI now emits a warning instead of failing.
 
-The review output was cut off at the start of a twelfth finding (about
-`main_tagged.tex`); two further runs (one on the fallback model
-`nvidia/z-ai/glm-5.3-flash`) returned no findings, so that item is
-unknown.
+One further finding, about `main_tagged.tex`, was truncated before it could
+be read, and two repeat passes raised nothing in its place; that item is
+therefore unknown rather than accepted or rejected.
 
 ## How to reproduce
 

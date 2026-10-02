@@ -50,8 +50,8 @@ If the threads had accessed the sum at different times then the count would have
 A few of the possible different orderings are below.
 
 Permissible Pattern
-\begin{center}
 \begin{table}[h]
+  \centering
 \caption{Good Thread Access Pattern}
 \begin{tabular}{ l | r }
   Thread 1 & Thread 2 \\ \hline
@@ -61,11 +61,10 @@ Permissible Pattern
   ... & Store (i=2 globally)  \\
 \end{tabular}
 \end{table}
-\end{center}
 Partial Overlap
 
-\begin{center}
 \begin{table}[h]
+  \centering
 \caption{Bad Thread Access Pattern}
 \begin{tabular}{ l | r }
 Thread 1 & Thread 2 \\ \hline
@@ -74,11 +73,10 @@ Store (i=1 globally) & Load Addr, Add 1 (i=1 locally) \\
 ... & Store (i=1 globally) \\
 \end{tabular}
 \end{table}
-\end{center}
 
 Full Overlap
-\begin{center}
 \begin{table}[h]
+  \centering
 \caption{Horrible Thread Access Pattern}
 \begin{tabular}{ l | r }
 Thread 1 & Thread 2 \\ \hline
@@ -86,7 +84,6 @@ Load Addr, Add 1 (i=1 locally) & Load Addr, Add 1 (i=1 locally) \\
 Store (i=1 globally) & Store (i=1 globally) \\
 \end{tabular}
 \end{table}
-\end{center}
 We would like the first pattern of the code being mutually exclusive.
 Which leads us to our first synchronization primitive, a Mutex.
 
@@ -1079,8 +1076,8 @@ It is impossible for two threads to be inside the critical section at the same t
 However, this code suffers from deadlock!
 Suppose two threads wish to enter the critical section at the same time.
 
-\begin{center}
 \begin{table}[h]
+  \centering
 \caption{Candidate Solution \#2 Analysis}
 \begin{tabular}{|l|c|c|}
 Time & Thread 1 & Thread 2 \\ \hline
@@ -1089,7 +1086,6 @@ Time & Thread 1 & Thread 2 \\ \hline
 3 & Wait & Wait \\
 \end{tabular}
 \end{table}
-\end{center}
 
 Both processes are now waiting for the other one to lower their flags.
 Neither one will enter the critical section as both are now stuck forever!
@@ -1140,8 +1136,8 @@ The turn flag now points to the second thread.
 While the first thread is still inside the Critical Section, the second thread arrives.
 The second thread can immediately continue into the Critical Section!
 
-\begin{center}
 \begin{table}[h]
+  \centering
 \caption{Candidate Solution \#4}
 \begin{tabular}{|l|l|l|l|}
 Time & Turn & Thread \# 1 & Thread \# 2 \\ \hline
@@ -1151,7 +1147,6 @@ Time & Turn & Thread \# 1 & Thread \# 2 \\ \hline
 4 & 2 & // Do Critical Section Stuff & Do Critical Section Stuff - OOPS \\
 \end{tabular}
 \end{table}
-\end{center}
 
 \section{Working Solutions}
 

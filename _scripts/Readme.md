@@ -16,6 +16,7 @@
 * `alt_lint.py` Checks every content figure's `\includegraphics` has alt text (issue #238 C1)
 * `epub_check.py`, `wiki_check.py` Check the built EPUB / wiki carry each figure's alt text (issue #238 A2, A3); also run after deploy
 * `alt_check_common.py` Shared by the two checks
+* `compare_pandoc_ast.py` Reports the element-count change between two pandoc JSON ASTs, and checks the wiki's citations rendered (issue #238 A4)
 * `test_pandoc_filters.py`, `test_alt_lint.py` Unit tests (`python3 -m unittest _scripts.test_pandoc_filters`)
 
 The EPUB and wiki need pandoc 3.10.2 and panflute 2.3.1; `install.sh` pins both and explains why.

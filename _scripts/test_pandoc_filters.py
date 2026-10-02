@@ -31,6 +31,7 @@ os.unlink(_cache.name)
 os.environ.setdefault('LINK_CACHE_FILE_NAME', _cache.name)
 
 import panflute as pf  # noqa: E402
+import yaml  # noqa: E402
 
 import alt_text  # noqa: E402
 import alt_check_common  # noqa: E402
@@ -187,7 +188,10 @@ class TestWikiFigure(FilterTestCase):
                                                   'Empty heap')),
                              input_format='panflute', output_format='gfm+raw_html',
                              standalone=False)
-        self.assertIn('![Seven heap blocks](' + pandoc_wiki_filter.base_raw_url + PNG + ')', md)
+        # The alt text is ordinary Str/Space inlines, so gfm may wrap inside
+        # it at its column limit; Markdown reads that newline as a space.
+        self.assertIn('![Seven heap blocks](' + pandoc_wiki_filter.base_raw_url + PNG + ')',
+                      ' '.join(md.split()))
         self.assertIn('*Empty heap*', md)
         self.assertNotIn('<figure', md)
 
@@ -238,7 +242,9 @@ class TestEndToEnd(FilterTestCase):
     def test_wiki_filter_gfm(self):
         out = self.pandoc(figure('alt={Seven heap blocks}', 'Empty heap'),
                           'gfm+raw_html', '_scripts/pandoc_wiki_filter.py')
-        self.assertIn('![Seven heap blocks](', out)
+        # Whitespace-normalised: gfm may wrap inside the alt text (see
+        # alt_text.inlines_from_alt).
+        self.assertIn('![Seven heap blocks](', ' '.join(out.split()))
         self.assertNotIn('<figure', out)
 
     def test_filter_failure_fails_pandoc(self):
@@ -248,9 +254,29 @@ class TestEndToEnd(FilterTestCase):
 
 
 class TestEpubMetadataAndCover(unittest.TestCase):
-    def test_empty_date_removed(self):
+    def test_empty_date_filled_from_metadata_file(self):
+        # prelude.tex's \date{} arrives empty. It must become the edition
+        # date from epub_metadata.yaml, not the build date (which is what
+        # pandoc substitutes when there is no date at all).
+        with open(os.path.join(SCRIPTS, 'epub_metadata.yaml'), encoding='utf-8') as f:
+            want = str(yaml.safe_load(f)['date'])
         doc = pf.Doc(metadata={'date': pf.MetaInlines()})
         pandoc_epub_filter.finalize(doc)
+        self.assertEqual(doc.get_metadata('date'), want)
+
+    def test_missing_date_filled_from_metadata_file(self):
+        doc = pf.Doc()
+        pandoc_epub_filter.finalize(doc)
+        self.assertTrue(doc.get_metadata('date', default=''))
+
+    def test_empty_date_removed_when_metadata_file_sets_none(self):
+        doc = pf.Doc(metadata={'date': pf.MetaInlines()})
+        original = pandoc_epub_filter.metadata_file_date
+        pandoc_epub_filter.metadata_file_date = lambda: ''
+        try:
+            pandoc_epub_filter.finalize(doc)
+        finally:
+            pandoc_epub_filter.metadata_file_date = original
         self.assertNotIn('date', doc.metadata)
 
     def test_real_date_kept(self):

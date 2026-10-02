@@ -16,7 +16,7 @@ from panflute import (run_filter, Image, Math, Link, RawInline, Figure,
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from alt_text import apply_alt, fix_code_language  # noqa: E402
 
-base_raw_url = 'https://raw.githubusercontent.com/illinois-cs241/coursebook/master/'
+base_raw_url = 'https://raw.githubusercontent.com/cs341-illinois/coursebook/master/'
 eps_ext = '.eps'
 
 

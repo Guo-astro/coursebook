@@ -100,13 +100,36 @@ def fix_code_language(code_block):
     return code_block
 
 
+def inlines_from_alt(text):
+    """Split rendered alt text into Str/Space inlines.
+
+    In pandoc's model a Str holds no spaces: a reader emits Str and Space
+    elements, and the writers are entitled to assume that shape. Handing
+    them one Str with spaces inside it is malformed, however well it
+    happens to work. (This is how PR #248 built its alt inlines.)
+
+    One visible consequence: the gfm writer wraps inline content at its
+    column limit, and now that the alt text is ordinary inlines it can wrap
+    inside the image's alt, as ![Seven heap\\nblocks](...). Markdown reads
+    that newline as a single space, so the wiki renders the same; the
+    checks normalise whitespace before comparing. A single Str accidentally
+    suppressed the wrapping because the writer could not break inside it.
+    """
+    inlines = []
+    for i, word in enumerate(text.split()):
+        if i:
+            inlines.append(pf.Space())
+        inlines.append(pf.Str(word))
+    return inlines
+
+
 def apply_alt(img):
     """Resolve img's alt text and store it back as the Image's content.
 
-    Storing the rendered string (rather than leaving pandoc's raw Str) is
+    Storing the rendered text (rather than leaving pandoc's raw Str) is
     what makes the writers emit c_str instead of c\\_str, and gives a
     caption-only figure a real alt attribute instead of an empty one.
     """
     alt = resolve_alt(img)
-    img.content = [pf.Str(alt)]
+    img.content = inlines_from_alt(alt)
     return alt

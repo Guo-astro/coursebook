@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from alt_check_common import (Counter, compare, content_figures,  # noqa: E402
                               expected_alt, normalize, png_path)
 
-BASE_RAW_URL = 'https://raw.githubusercontent.com/illinois-cs241/coursebook/master/'
+BASE_RAW_URL = 'https://raw.githubusercontent.com/cs341-illinois/coursebook/master/'
 
 # ![alt](url): the alt may wrap across lines and contain \-escapes.
 MD_IMAGE_RE = re.compile(r'!\[((?:[^\]\\]|\\.)*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)', re.DOTALL)

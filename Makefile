@@ -41,7 +41,7 @@ epub: $(MAIN_EPUB)
 # has no option for.
 $(MAIN_EPUB): $(ORDER_TEX) $(MAIN_TEX_SOURCE) _scripts/epub_metadata.yaml _scripts/epub_redefinitions.tex \
 		_images/cover.png _scripts/pandoc_epub_filter.py _scripts/alt_text.py _scripts/epub_cover_alt.py
-	pandoc --toc -s -f latex -t epub --mathml --citeproc --filter _scripts/pandoc_epub_filter.py --metadata-file _scripts/epub_metadata.yaml -M link-citations=true --epub-cover-image _images/cover.png -M author="B. Venkatesh, L. Angrave, et Al." -o $(MAIN_EPUB) _scripts/epub_redefinitions.tex $(MAIN_TEX_SOURCE)
+	pandoc --toc -s -f latex -t epub --mathml --citeproc --filter _scripts/pandoc_epub_filter.py --metadata-file _scripts/epub_metadata.yaml -M link-citations=true -M lang=en-US --epub-cover-image _images/cover.png -M author="B. Venkatesh, L. Angrave, et Al." -o $(MAIN_EPUB) _scripts/epub_redefinitions.tex $(MAIN_TEX_SOURCE)
 	python3 _scripts/epub_cover_alt.py $(MAIN_EPUB)
 
 $(ORDER_TEX): $(ORDER_TEX_DEP)

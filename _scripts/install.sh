@@ -37,9 +37,9 @@ then
     # EPUBCheck, the W3C EPUB validator (gate A2b), pinned exactly.
     # script.sh runs it on main.epub. It needs Java 11 or later: GitHub's
     # ubuntu runners ship one, and anywhere else we install a headless JRE.
-    EPUBCHECK_VERSION=5.3.0
+    EPUBCHECK_VERSION=5.4.0
     EPUBCHECK_ZIP=epubcheck-${EPUBCHECK_VERSION}.zip
-    EPUBCHECK_SHA256=6c07e68584b2e2ce2f89fe06e1246dfead3eb36b46b340e7d93524f29dcff6c5
+    EPUBCHECK_SHA256=33350c61038e71dfb3d45a76aed04bf5481e6d5500cb780f6e98db8bbd15a28c
     if ! command -v java > /dev/null
     then
         sudo apt-get update -qq

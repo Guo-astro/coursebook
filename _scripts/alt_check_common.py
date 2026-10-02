@@ -92,13 +92,32 @@ def png_path(path):
 
 
 def content_figures(root):
-    """alt_lint's content-figure list, without its private _fields."""
-    figs = [{k: v for k, v in f.items() if not k.startswith('_')}
-            for f in alt_lint.scan(root)]
+    """alt_lint's content-figure list, without its private _fields.
+
+    Refuses to hand back a list alt_lint itself would fail on: an expected
+    figure list built from a broken source scan would make these checks
+    compare the outputs against the wrong thing, and pass or fail for
+    reasons that have nothing to do with the EPUB or the wiki.
+    """
+    scanned = alt_lint.scan(root)
+
+    def where(items):
+        return ', '.join('{}:{}'.format(f['file'], f['line']) for f in items)
+
+    malformed = [f for f in scanned if f.get('_malformed')]
+    if malformed:
+        raise SystemExit('alt_lint reports malformed \\includegraphics: {}'.format(
+            where(malformed)))
+    unreachable = [f for f in scanned if f.get('_unreachable')]
+    if unreachable:
+        raise SystemExit('alt_lint reports figures no chapter in order.yaml '
+                         'reaches: {}'.format(where(unreachable)))
+
+    figs = [{k: v for k, v in f.items() if not k.startswith('_')} for f in scanned]
     missing = [f for f in figs if not f['alt'].strip()]
     if missing:
         raise SystemExit('alt_lint reports figures without alt text: {}'.format(
-            ', '.join('{}:{}'.format(f['file'], f['line']) for f in missing)))
+            where(missing)))
     return figs
 
 

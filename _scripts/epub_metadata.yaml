@@ -9,6 +9,25 @@
 # If you add a kind of content (audio, video, animation, a figure
 # without alt=), revisit this file.
 
+# The book's language, written to <dc:language>. EPUB requires it, and a
+# screen reader picks its voice and pronunciation rules from it. Also
+# passed as -M lang=en-US in the Makefile, so the XHTML gets xml:lang too.
+lang: en-US
+
+# The edition date, written to <dc:date>.
+#
+# This is deliberately a fixed date in the sources, not the build date.
+# prelude.tex's \date{} (there for the PDF title page) gives pandoc an
+# empty date, which it writes as <dc:date></dc:date> and EPUBCheck rejects
+# (RSC-005); with no date at all pandoc substitutes the moment of the
+# build, so the same sources would produce a different EPUB every day.
+# Bump this when publishing an edition worth dating.
+#
+# <meta property="dcterms:modified"> is still the build timestamp: pandoc
+# always writes it and offers no way to set it, so the EPUB is not
+# byte-reproducible, only stable in the metadata we control.
+date: '2026-10-01'
+
 # The book is text plus 48 diagrams (and a cover) that carry information.
 # pandoc's default, ["textual"], leaves out the diagrams.
 accessModes:

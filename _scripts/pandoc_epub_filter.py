@@ -11,6 +11,8 @@ the enclosing figure's caption; see alt_text.py. No alt means no build.
 import os.path
 import sys
 
+import yaml
+
 from panflute import run_filter, Image, CodeBlock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -42,13 +44,36 @@ def doc_filter(elem, doc):
         return elem
 
 
+def metadata_file_date():
+    """The edition date from epub_metadata.yaml, or '' if it sets none."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        'epub_metadata.yaml')
+    try:
+        with open(path, encoding='utf-8') as f:
+            return str(yaml.safe_load(f).get('date') or '').strip()
+    except (OSError, AttributeError, yaml.YAMLError):
+        return ''
+
+
 def finalize(doc):
     # prelude.tex's \date{} (there for the PDF title) gives an empty date,
     # which pandoc writes as <dc:date></dc:date>, and EPUBCheck rejects
-    # that (RSC-005). Without a date, pandoc uses the build date.
+    # that (RSC-005). Deleting it is not enough: with no date at all pandoc
+    # substitutes the moment of the build, so the same sources would give a
+    # different EPUB every day. That empty \date{} also beats the date in
+    # --metadata-file, so the metadata file alone cannot fix it either.
+    #
+    # So fill in the edition date from epub_metadata.yaml, which is the one
+    # place it is written and the file epub_check.py compares content.opf
+    # against. If that file sets no date, fall back to dropping the empty
+    # one, which at least keeps EPUBCheck happy.
     date = doc.get_metadata('date', default=None)
-    if date is not None and not str(date).strip():
-        del doc.metadata['date']
+    if date is None or not str(date).strip():
+        fixed = metadata_file_date()
+        if fixed:
+            doc.metadata['date'] = fixed
+        elif date is not None:
+            del doc.metadata['date']
 
 
 def main(doc=None):

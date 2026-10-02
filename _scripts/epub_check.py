@@ -123,6 +123,28 @@ def check_opf(opf_text, metadata_file):
         errors.append('content.opf has {} but epub_metadata.yaml does not set it'.format(prop))
     if re.search(r'<dc:date[^>]*>\s*</dc:date>', opf_text):
         errors.append('content.opf has an empty <dc:date> (EPUBCheck RSC-005)')
+
+    # <dc:language>. EPUB requires one, and a screen reader chooses its
+    # voice from it; pandoc writes whatever -M lang / the metadata file say.
+    found_lang = re.findall(r'<dc:language[^>]*>([^<]*)</dc:language>', opf_text)
+    want_lang = want.get('lang')
+    if not want_lang:
+        errors.append('epub_metadata.yaml has no lang')
+    elif found_lang != [want_lang]:
+        errors.append('content.opf <dc:language>: found {}, expected [{!r}]'.format(
+            found_lang, want_lang))
+
+    # <dc:date>. It must be the fixed date from the sources, not the build
+    # date: see the comment in epub_metadata.yaml.
+    found_date = [d.strip() for d in
+                  re.findall(r'<dc:date[^>]*>([^<]*)</dc:date>', opf_text)]
+    want_date = str(want.get('date') or '')
+    if not want_date:
+        errors.append('epub_metadata.yaml has no date')
+    elif found_date != [want_date]:
+        errors.append('content.opf <dc:date>: found {}, expected [{!r}]; a build '
+                      'timestamp here means the date metadata did not reach pandoc'.format(
+                          found_date, want_date))
     return errors
 
 

@@ -78,20 +78,20 @@ jinja_templ = """
 # Coursebook
 
 <p align="center">
-    <img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/duck-alpha-cropped.png" alt="" width="50%" class="emoji"/>
+    <img src="https://raw.githubusercontent.com/cs341-illinois/coursebook/master/_images/duck-alpha-cropped.png" alt="" width="50%" class="emoji"/>
 </p>
 
-This coursebook is being built by students and faculty from the University of Illinois. It is based on a crowd-source authoring wikibook experiment by Lawrence Angrave from CS @ Illinois, but is now its own .tex based project. Its source code is located at [the Github link](https://github.com/illinois-cs241/coursebook) which you can find a pdf version of the book as well.
+This coursebook is being built by students and faculty from the University of Illinois. It is based on a crowd-source authoring wikibook experiment by Lawrence Angrave from CS @ Illinois, but is now its own .tex based project. Its source code is located at [the Github link](https://github.com/cs341-illinois/coursebook) which you can find a pdf version of the book as well.
 
 This book is an introduction to programming in C, and system programming (processes, threads, synchronization, networking and more!). We assume you've already had some programming experience, in an earlier computer science course. If you have any typos to report or content to request, feel free to file an issue at the link above. Happy Reading!
 
-<h3 id="one-big-pdf" class="title-text"><a href="https://github.com/illinois-cs241/coursebook/tree/pdf_deploy/main.pdf?raw=true" alt="PDF Version" class="wiki-link">One Big PDF<img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/pdf_icon.png" alt="" style="margin-left: 10px;" width="auto" height="50px"> </a></h3>
+<h3 id="one-big-pdf" class="title-text"><a href="https://github.com/cs341-illinois/coursebook/tree/pdf_deploy/main.pdf?raw=true" alt="PDF Version" class="wiki-link">One Big PDF<img src="https://raw.githubusercontent.com/cs341-illinois/coursebook/master/_images/pdf_icon.png" alt="" style="margin-left: 10px;" width="auto" height="50px"> </a></h3>
 
-<h3 id="one-big-epub" class="title-text"><a href="https://github.com/illinois-cs241/coursebook/tree/epub_deploy/main.epub?raw=true" alt="Epub Versions" class="wiki-link">One Big EPUB<img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/epub_icon.png" alt="" style="margin-left: 10px;" width="auto" height="50px"> </a></h3>
+<h3 id="one-big-epub" class="title-text"><a href="https://github.com/cs341-illinois/coursebook/tree/epub_deploy/main.epub?raw=true" alt="Epub Versions" class="wiki-link">One Big EPUB<img src="https://raw.githubusercontent.com/cs341-illinois/coursebook/master/_images/epub_icon.png" alt="" style="margin-left: 10px;" width="auto" height="50px"> </a></h3>
 
 
 {% for chapter in chapters %}
-## {{loop.index}}. [{{chapter.meta['name']}}](./{{chapter.bare_title}}) [<img src="https://raw.githubusercontent.com/illinois-cs241/coursebook/master/_images/pdf_icon.png" alt="PDF of {{chapter.meta['name']|e}}" width="auto" height="50px" />](https://github.com/illinois-cs241/coursebook/blob/pdf_deploy/{{chapter.pdf_path}}) {% for section_name in (chapter.meta['subsections'] or []) %}
+## {{loop.index}}. [{{chapter.meta['name']}}](./{{chapter.bare_title}}) [<img src="https://raw.githubusercontent.com/cs341-illinois/coursebook/master/_images/pdf_icon.png" alt="PDF of {{chapter.meta['name']|e}}" width="auto" height="50px" />](https://github.com/cs341-illinois/coursebook/blob/pdf_deploy/{{chapter.pdf_path}}) {% for section_name in (chapter.meta['subsections'] or []) %}
 {{loop.index}}. [{{section_name}}](./{{chapter.bare_title}}#{{section_name.lower().replace(' ', '-')}}){% endfor %}
 {% endfor %}
 """

@@ -1,0 +1,245 @@
+% cs341code.sty -- the book's code blocks, built on the LaTeX kernel's
+% verbatim so that a tagged PDF gets real structure (issue #238, Part B).
+%
+% This replaces the listings package, which the LaTeX tagging code does
+% not support: in a tagged PDF each code block here becomes one /Code
+% structure element with one child element per source line, and the text
+% stays real, selectable text. It keeps the old look (grey box, 1.5cm
+% side margins, 20pt above and below, long lines wrapped at spaces and
+% continued under their own indentation plus 20pt) but drops listings'
+% syntax colouring.
+%
+% The environment names stay the same (lstlisting, minted and
+% \lstinputlisting), because pandoc reads them for the EPUB and the wiki
+% and keeps their language. Options are accepted and ignored. prelude.tex
+% loads this file with \RequirePackage, which pandoc does not parse (it
+% does parse a local .sty named in \usepackage).
+%
+% With \DocumentMetadata (the default `make pdf`), the blocks are latex-lab
+% blocks, like the kernel's verbatim; without it (`make pdf TAGGED=0`) they
+% are the kernel's plain verbatim. Both give the same text and layout.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{cs341code}[2026/09/14 v1.0 CS341 code blocks on the kernel verbatim]
+\RequirePackage{xcolor}
+\RequirePackage{framed}
+\providecolor{shadecolor}{HTML}{EEEEEE}
+
+\newif\ifcs@lead
+\newdimen\cs@code@pad         \cs@code@pad=5.4pt        % listings: frame margin 5pt + 0.4pt rule
+\newdimen\cs@code@margin      \cs@code@margin=1.5cm     % listings: xleftmargin, xrightmargin
+\newdimen\cs@code@breakindent \cs@code@breakindent=20pt % listings: breakindent
+\newskip\cs@code@skip         \cs@code@skip=20pt        % listings: aboveskip, belowskip
+
+% Scanners: everything up to \end{<env>}, read with verbatim catcodes,
+% goes to \cs@code@body.
+\begingroup
+\catcode`|=0 \catcode`[=1 \catcode`]=2
+\catcode`\{=12 \catcode`\}=12 \catcode`\\=12
+|gdef|cs@code@scan@lstlisting#1\end{lstlisting}[|cs@code@body[#1]|end[lstlisting]]
+|gdef|cs@code@scan@minted#1\end{minted}[|cs@code@body[#1]|end[minted]]
+|endgroup
+% Before scanning, drop the end of the \begin{...} line, so the body
+% starts with the block's first line: after \begin{lstlisting}[...] or
+% \begin{minted}{C} it arrives as an active ^^M; after a bare
+% \begin{lstlisting}, the optional-argument check has already read it as
+% a space token.
+\def\cs@code@go{\futurelet\cs@next\cs@code@eol}
+\begingroup\catcode`\^^M=\active%
+\gdef\cs@code@eol{\ifx\cs@next^^M\expandafter\cs@code@gobscan%
+  \else\ifx\cs@next\@sptoken\expandafter\expandafter\expandafter\cs@code@gobsp%
+  \else\expandafter\expandafter\expandafter\cs@code@scan\fi\fi}%
+\endgroup
+\def\cs@code@gobscan#1{\cs@code@scan}
+\def\cs@code@gobsp{\afterassignment\cs@code@scan\let\cs@tmp= }
+
+% The body goes through Lua and comes back as input lines, read with the
+% same verbatim catcodes, so the source is typeset as written except for
+% two things listings did too: a tab moves to the next multiple of 4
+% columns (tabsize=4), and blank or white-space-only lines at the end of
+% a block are dropped. \obeyedline first, as in the kernel's verbatim:
+% the first \par only switches the line handling on, so a blank first
+% line still prints (listings printed it).
+\directlua{
+  cs341code = cs341code or {}
+  local function expandtabs(line)
+    if not line:find("\string\t", 1, true) then return line end
+    local out, col = {}, 0
+    for _, c in utf8.codes(line) do
+      if c == 9 then
+        local n = 4 - col % 4
+        out[\string#out + 1] = string.rep(" ", n)
+        col = col + n
+      else
+        out[\string#out + 1] = utf8.char(c)
+        col = col + 1
+      end
+    end
+    return table.concat(out)
+  end
+  function cs341code.block(s)
+    local lines = {}
+    for l in (s .. "\string\r"):gmatch("(.-)\string\r") do lines[\string#lines + 1] = l end
+    while \string#lines > 0 and lines[\string#lines]:match("^[ \string\t]*$") do
+      lines[\string#lines] = nil
+    end
+    for i, l in ipairs(lines) do lines[i] = expandtabs(l) end
+    tex.print(lines)
+  end
+}
+\def\cs@code@body#1{\obeyedline
+  \directlua{cs341code.block("\luaescapestring{\detokenize{#1}}")}}
+
+% A verbatim space that allows a line break. While a line has had only
+% spaces so far, each one also widens the hanging indent, so a wrapped
+% line continues under its own indentation plus 20pt (listings'
+% breakautoindent and breakindent). \parshape 0 because latex-lab's
+% blocks set a \parshape, which would override \hangindent.
+\def\cs@code@obeysp{\leavevmode
+  \ifnum\lastnodetype=\z@ \cs@leadfalse\fi % a character came before
+  \ifcs@lead \advance\hangindent\fontdimen2\font \fi
+  \parshape\z@ \penalty\z@\ }
+\def\cs@code@startline{\cs@leadtrue\hangindent\cs@code@breakindent\hangafter\@ne}
+% Runs after the verbatim setup, just before the scanner. One block shows
+% raw bytes including DEL (^^?), an invalid character to TeX and invisible
+% anyway: ignore it (catcode 9). listings printed it as "-", an accident
+% of the old T1 encoding.
+%
+% A token too long for the line (a long path, URL or option list with no
+% space in it) would otherwise run past the grey box, even off the page,
+% as it did with listings (breakatwhitespace). So a line may also break
+% after , / ; & | ? = :, with a penalty so high that TeX does that only
+% when a line cannot break at a space.
+\def\cs@code@lines{\catcode`\^^?=9 \rightskip\z@\@plus1fil\relax
+  \cs@code@breakafter\,\cs@code@breakafter\/\cs@code@breakafter\;%
+  \cs@code@breakafter\&\cs@code@breakafter\|\cs@code@breakafter\?%
+  \cs@code@breakafter\=\cs@code@breakafter\:}
+\def\cs@code@breakafter#1{\catcode`#1\active
+  \begingroup\lccode`\~=`#1\relax
+  \lowercase{\endgroup\def~{\leavevmode\kern\z@\char`#1\penalty9999\relax}}}
+
+% The grey box: framed, so that a long block can break across pages.
+% Like listings (xleftmargin, xrightmargin), the text sits 1.5cm inside
+% the current line on both sides -- in a list item, inside the item's
+% indentation -- and the colour .5em (5.4pt) outside the text. The box
+% is placed by \@totalleftmargin, as framed's own shaded box is, and
+% inside it nothing indents again: the kernel verbatim would add the list
+% indentation as \leftskip, latex-lab's block as \parshape. framed sets
+% the frame with \centerline, so the frame is exactly \columnwidth wide
+% (as framed's own frames are), or it would be centred, not placed.
+\def\cs@code@frame{\par\addvspace{\cs@code@skip}%
+  \def\FrameCommand##1{\hbox to\columnwidth{\hskip\@totalleftmargin
+    \hskip\dimexpr\cs@code@margin-\cs@code@pad\relax
+    \fboxsep\cs@code@pad\colorbox{shadecolor}{##1}\hss}}%
+  \MakeFramed{\hsize\dimexpr\linewidth-2\cs@code@margin\relax
+    \FrameRestore\@totalleftmargin\z@\linewidth\hsize\parshape\z@}%
+  % A heading just before the block sets \if@nobreak (globally), so that no
+  % page break follows it; the first paragraph after it normally clears
+  % that. Inside the frame \FrameRestore makes it locally false, so it was
+  % never cleared, and the next \section added no space above it (seen in
+  % the untagged build). framed has used it by now: clear it.
+  \@nobreakfalse}
+\def\cs@code@endframe{\endMakeFramed\par\addvspace{\cs@code@skip}}
+
+% Tagged (latex-lab's block module is loaded) or not.
+\newif\ifcs@code@tagged
+\IfInstanceExistsTF{blockenv}{verbatim}{\cs@code@taggedtrue}{\cs@code@taggedfalse}
+\PackageInfo{cs341code}{Code blocks as \ifcs@code@tagged latex-lab (tagged)\else kernel verbatim (untagged)\fi\space blocks}
+\ifcs@code@tagged
+  % Tagged build: a latex-lab block declared like the kernel's verbatim
+  % (latex-lab-block), so the block is a verbatim structure (role /Code)
+  % and every line a codeline (role /Span). Our own instances only change
+  % the layout: no list spacing (the grey box has its own), ragged right
+  % so a long line can wrap.
+  \NewSocketPlug{verbatim/startline}{cs341code}{\cs@code@startline}
+  \DeclareInstance{para}{cs341code}{std}
+    {para-indent=0pt, begin-hspace=0pt, left-hspace=0pt,
+     right-hspace=0pt plus 1fil, end-hspace=\@flushglue}
+  \DeclareInstance{block}{cs341code-1}{std}
+    {begin-vspace=0pt, begin-extra-vspace=0pt, end-vspace=0pt,
+     end-extra-vspace=0pt, left-margin=0pt, para-vspace=0pt}
+  \DeclareInstanceCopy{block}{cs341code-2}{cs341code-1}
+  \DeclareInstanceCopy{block}{cs341code-3}{cs341code-1}
+  \DeclareInstanceCopy{block}{cs341code-4}{cs341code-1}
+  \DeclareInstanceCopy{block}{cs341code-5}{cs341code-1}
+  \DeclareInstanceCopy{block}{cs341code-6}{cs341code-1}
+  \DeclareInstance{blockenv}{cs341code}{std}
+    {name=verbatim, tag-name=\UseStructureName{block/verbatim},
+     tag-attr-class=, tagging-recipe=standard, tagging-suppress-paras=true,
+     inner-level-counter=, transparent-level=true, legacy-code=,
+     block-instance=cs341code, inner-instance=, para-instance=cs341code,
+     final-code=\legacyverbatimsetup{invisible}\cs@code@lines\cs@code@go}
+  % The inner group ends before \endMakeFramed, whose \par must not be the
+  % verbatim \par (that would start one more, empty, codeline after the
+  % /Code element has closed).
+  \def\cs@code@begin#1{\cs@code@frame\begingroup
+    \let\@xobeysp\cs@code@obeysp
+    \AssignSocketPlug{verbatim/startline}{cs341code}%
+    \expandafter\let\expandafter\cs@code@scan\csname cs@code@scan@#1\endcsname
+    \SimpleBlockEnv{cs341code}{}}
+  \def\cs@code@end{\BlockEnvEnd\endgroup\cs@code@endframe}
+\else
+  % Untagged build: the kernel's verbatim, with the same line handling.
+  \def\cs@code@begin#1{\cs@code@frame\begingroup
+    \let\@xobeysp\cs@code@obeysp
+    \topsep\z@\partopsep\z@
+    \@verbatim\frenchspacing\@vobeyspaces
+    \let\cs@code@kpar\par \def\par{\cs@code@kpar\cs@code@startline}%
+    \expandafter\let\expandafter\cs@code@scan\csname cs@code@scan@#1\endcsname
+    \cs@code@lines\cs@code@go}
+  % A paragraph that continues straight after a block (no blank line) is
+  % indented in both builds. listings did not indent it, but in the tagged
+  % build \@endpetrue after the framed box unbalances latex-lab's paragraph
+  % structure ("no open structure on the stack"), and both builds must set
+  % the same text (B4a).
+  \def\cs@code@end{\endtrivlist\endgroup\cs@code@endframe}
+\fi
+
+% Options: the book only ever gives a language, which pandoc uses and the
+% PDF ignores. Any other option (a caption, say) would be lost without a
+% word, so it gets a warning.
+\ExplSyntaxOn
+\keys_define:nn { cs341code }
+  {
+    language .code:n = { } ,
+    unknown  .code:n =
+      { \msg_warning:nnV { cs341code } { option-ignored } \l_keys_key_str }
+  }
+\msg_new:nnn { cs341code } { option-ignored }
+  { Code~block~option~'#1'~ignored~\msg_line_context: }
+\cs_new_protected:Npn \__cscode_options:n #1
+  { \IfValueT {#1} { \keys_set:nn { cs341code } {#1} } }
+\ExplSyntaxOff
+% \begin{lstlisting}[language=C] ... \end{lstlisting}
+\NewDocumentEnvironment{lstlisting}{!o}
+  {\UseName{__cscode_options:n}{#1}\cs@code@begin{lstlisting}}{\cs@code@end}
+% \begin{minted}[options]{C} ... \end{minted}: the book's old listings-based
+% emulation of minted put the code in a minipage in small type, so it
+% never split across pages; keep both (between lines the verbatim \par
+% puts \interlinepenalty, so no page break).
+\NewDocumentEnvironment{minted}{o m}
+  {\UseName{__cscode_options:n}{#1}%
+   \footnotesize\interlinepenalty\@M\cs@code@begin{minted}}{\cs@code@end}
+
+% \lstinputlisting[options]{file}: used once, for AUTHORS.md, which is a
+% list of names and not code. Each non-blank line of the file becomes one
+% line of ordinary small text (in a tagged PDF, one paragraph per name);
+% blank lines are skipped (the file has none). The options are ignored;
+% they only restyled listings' output as plain text.
+\ExplSyntaxOn
+\ior_new:N \g__cscode_input_ior
+\NewDocumentCommand \lstinputlisting { o m }
+  {
+    \par
+    \group_begin:
+      \small \rmfamily
+      % the font for the list (cs341book.sty: one with CJK), if one is set
+      \cs_if_exist_use:N \cscodeinputfont
+      \dim_zero:N \parindent
+      \raggedright
+      \ior_open:Nn \g__cscode_input_ior {#2}
+      \ior_str_map_inline:Nn \g__cscode_input_ior
+        { \tl_if_blank:nF {##1} { ##1 \par } }
+      \ior_close:N \g__cscode_input_ior
+    \group_end:
+  }
+\ExplSyntaxOff

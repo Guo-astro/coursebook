@@ -1,0 +1,21 @@
+% The tagged (accessible) PDF, which is what `make pdf` builds (issue
+% #238, Part B). `make pdf TAGGED=0` builds main_wrapper.tex instead, the
+% same book without \DocumentMetadata, for debugging.
+%
+% \DocumentMetadata has to come before \documentclass, so this file wraps
+% main_wrapper.tex rather than editing it. Key names checked against TeX
+% Live 2026 (latex-lab 2026-06-08, documentmetadata-support.ltx):
+% testphase=phase-III implies tagging=on, firstaid is still a module.
+% They have changed between releases, so re-check them when the pinned
+% TeX Live in .github/workflows moves.
+%
+% No package needs containment hooks here any more: the ones the tagging
+% code does not support were replaced (see cs341code.sty, cs341book.sty
+% and docs/pdf-tagging-spike.md).
+\DocumentMetadata{
+  lang=en-US,
+  pdfversion=2.0,
+  pdfstandard=ua-2,
+  testphase={phase-III,firstaid},
+}
+\input{main_wrapper.tex}

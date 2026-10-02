@@ -8,51 +8,6 @@
 \input{glossary.tex}
 \makeglossaries
 
-% Define and set styles so not injected into the markdown
-% Pandoc chokes while processing the following, so put them here
-\lstdefinestyle{cstyle}
-{
-	language=C,
-	showspaces=false,
-	showtabs=false,
-	breaklines=true,
-	showstringspaces=false,
-	breakatwhitespace=true,
-	tabsize=4,
-	commentstyle=\color{comment}\itshape,
-	stringstyle=\color{red}\bfseries,
-	basicstyle=\ttfamily,
-	keywordstyle=\color{purple}\bfseries,
-	otherkeywords = {;,<<,>>,++,<,>,\#include,\#define},
-	morekeywords = [2]{;,\#include,\#define},
-	keywordstyle = [2]{\color{blue}\bfseries},
-	morekeywords = [3]{<<, >>},
-	keywordstyle = [3]{\color{yellow}},
-	morekeywords = [4]{++},
-	keywordstyle = [4]{\color{teal}},
-	morekeywords = [5]{<,>},
-	keywordstyle = [5]{\color{yellow}},
-	literate={\{}{{\CodeSymbol{ \{}}}1
-	{\}}{{\CodeSymbol{\}}}}1
-}
-\lstset{language=C,style=cstyle}
-
-%% Spacing
-\titlespacing*{\section}
-{0pt}{5.5ex plus 1ex minus .2ex}{4.3ex plus .2ex}
-\titlespacing*{\subsection}
-{0pt}{5.5ex plus 1ex minus .2ex}{2.3ex plus .2ex}
-\titlespacing*{\subsubsection}
-{0pt}{5.5ex plus 1ex minus .2ex}{2.3ex plus .2ex}
-
-
-%% PDF Sizes
-\titleformat*{\section}{\LARGE\bfseries}
-\titleformat*{\subsection}{\Large\bfseries}
-\titleformat*{\subsubsection}{\large\bfseries}
-\titleformat*{\paragraph}{\large\bfseries}
-\titleformat*{\subparagraph}{\large\bfseries}
-
 %% Go to the next page if a section only has 3 lines
 \widowpenalties 3 10000 10000 0
 

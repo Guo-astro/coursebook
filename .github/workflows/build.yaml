@@ -10,9 +10,13 @@ on:
 
 # A PR build has no side effects, so superseding one is always safe:
 # when someone pushes a fixup commit, kill the run for the old commit
-# rather than paying for a 9 minute PDF build nobody will look at.
+# rather than paying for a PDF build nobody will look at.
+#
+# The event name is part of the group so a hand-started run (which can be
+# asked for on master) cannot cancel the run for a push or a pull request
+# on the same ref: those two share github.ref but are not the same work.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -21,13 +25,13 @@ jobs:
     timeout-minutes: 30
 
     strategy:
-      # The three outputs are independent, and PDF is by far the slowest.
-      # With the default fail-fast, a WIKI failure 90 seconds in cancels
-      # the 9 minute PDF job, so the run tells you nothing about whether
-      # the PDF is healthy and the next push has to rediscover it.
+      # The outputs are independent. With the default fail-fast, a WIKI
+      # failure cancels the EPUB job, so the run tells you nothing about
+      # whether the EPUB is healthy and the next push has to rediscover it.
+      # (The PDF has its own jobs below.)
       fail-fast: false
       matrix:
-        build_focus: [WIKI, EPUB, PDF]
+        build_focus: [WIKI, EPUB]
     env:
       BUILD_FOCUS: ${{ matrix.build_focus }}
 
@@ -91,10 +95,24 @@ jobs:
         # so a change to \keyword or to the listings setup there reshapes the
         # whole comparison. A *chapter's* prose cannot change pandoc's
         # behaviour, only its input, so chapters are deliberately not here.
-        changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+        # Compare against the merge base, not the base branch tip: on a
+        # branch that is behind master, BASE_SHA..HEAD_SHA also contains
+        # every other PR merged since, so an unrelated merge would decide
+        # this gate (and, below, land in the A4 table as if this branch
+        # had caused it).
+        base=$(git merge-base "$BASE_SHA" "$HEAD_SHA") || base="$BASE_SHA"
+        # main_wrapper.tex, title.tex, glossary.tex and order.yaml are
+        # here with the macro files: main.tex \input's glossary.tex and
+        # order.tex (generated from order.yaml), so each one reshapes the
+        # AST that A4 compares, rather than only supplying prose.
+        changed=$(git diff --name-only "$base" "$HEAD_SHA" -- \
           requirements.txt \
           Makefile \
           main.tex \
+          main_wrapper.tex \
+          title.tex \
+          glossary.tex \
+          order.yaml \
           prelude.tex \
           github_redefinitions.tex \
           _scripts/install.sh \
@@ -145,12 +163,33 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
         path: baseline
+        # Full history so the step below can find the merge base.
+        fetch-depth: 0
 
     - name: Checkout this branch
       uses: actions/checkout@v4
       with:
         ref: ${{ github.event.pull_request.head.sha || github.sha }}
         path: current
+
+    # The baseline must be what this branch actually diverged from. The
+    # base branch *tip* also carries every other PR merged since, so on a
+    # branch that is behind master their changes would show up in the A4
+    # table as if this one had made them.
+    - name: Move the baseline to the merge base
+      working-directory: baseline
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ]; then
+          echo "not a pull request; the baseline stays at the default branch"
+          exit 0
+        fi
+        git fetch --no-tags origin "$HEAD_SHA"
+        base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+        echo "baseline commit: $base" | tee -a "$GITHUB_STEP_SUMMARY"
+        git checkout --detach "$base"
 
     - name: Setup python
       uses: actions/setup-python@v5
@@ -198,6 +237,13 @@ jobs:
         BUILD_FOCUS: EPUB
       run: |
         export PATH="$RUNNER_TEMP/pandoc-base/usr/bin:$RUNNER_TEMP/baseline-venv/bin:$PATH"
+        # gen_wiki.py keeps its link-check cache under $HOME and trusts an
+        # entry for 30 days, so with one HOME the baseline (which runs
+        # first) fills the cache and the current side's link checking is
+        # just a replay of what the old toolchain decided minutes earlier.
+        # A HOME of its own keeps the two sides' link checks independent.
+        export HOME="$RUNNER_TEMP/baseline-home"
+        mkdir -p "$HOME"
         pandoc --version | head -1
         python3 _scripts/gen_order.py order.yaml > order.tex
         # The AST A4 compares: main.tex alone, no filters, no citeproc.
@@ -206,9 +252,7 @@ jobs:
         # ones. Not blocking: the point of this job is the comparison, and
         # an old toolchain that no longer installs must not fail the PR. A
         # failure goes in the step summary, though, so an empty artifact is
-        # explained rather than just missing. (gen_wiki.py sets
-        # LINK_CACHE_FILE_NAME itself, to ~/cache, so both sides share that
-        # cache; it holds only link-check timestamps.)
+        # explained rather than just missing.
         make epub \
           || echo "baseline EPUB build failed; no baseline EPUB artifact" \
             | tee -a "$GITHUB_STEP_SUMMARY"
@@ -264,11 +308,142 @@ jobs:
         if-no-files-found: warn
         retention-days: 90
 
+  # The PDF (issue #238, Part B): the tagged book and the chapter PDFs,
+  # with the gates B1 (no TeX/tagpdf errors, no missing characters),
+  # B2 (structure: every figure's alt text, the duck an artifact) and B4a
+  # (the untagged build of the same sources has the same words and pages).
+  # All of them block. B3 (veraPDF) runs in the next job.
+  pdf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Pinned TeX Live 2026 (tlmgr r79639; latex-lab 2026-06-08, tagpdf
+    # 1.0c). TL2026 is the current release, so there is no historic tag
+    # yet: pin by digest. When moving the pin, re-check the
+    # \DocumentMetadata keys in main_tagged.tex (testphase key names have
+    # changed between releases) and the latex-lab interfaces
+    # cs341code.sty and cs341book.sty use (block and heading templates),
+    # then look at the visual diff; the gates catch errors, not looks.
+    container:
+      image: texlive/texlive:latest@sha256:1a1b8588cd73ac33fe1d7722c4065b3e6eaa3f3a20fb54d2934e42310264d134
+    # shell: bash runs steps with -eo pipefail, so a failure piped through
+    # tee is not lost.
+    defaults:
+      run:
+        shell: bash
+    env:
+      BUILD_FOCUS: PDF
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    # luaotfload's cache of the OpenType fonts. A fresh container builds it
+    # on the first run, which costs time in every job; it only changes with
+    # the image or the fonts cs341book.sty loads.
+    # The key follows the image pin (in the two workflow files) and the
+    # fonts the packages load.
+    - name: Cache LuaTeX fonts
+      uses: actions/cache@v4
+      with:
+        path: /usr/local/texlive/2026/texmf-var/luatex-cache
+        key: luatex-cache-${{ hashFiles('.github/workflows/build.yaml', '.github/workflows/deploy.yaml', 'cs341book.sty', 'cs341code.sty') }}
+
+    - name: Install
+      run: |
+        bash _scripts/install.sh
+
+    - name: Build the PDFs, B1 and B2
+      run: |
+        start=$(date +%s)
+        bash _scripts/script.sh
+        echo "make pdf, B1 and B2: $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
+
+    # The same sources built untagged. Blocking: B1 on the untagged logs,
+    # and the main book's words must equal the tagged build's. Reported
+    # only: the page count (392 tagged vs 394 untagged, from latex-lab's
+    # `center` around 15 floats) and the chapter PDFs, whose running heads
+    # follow the main book's page parity. See docs/pdf-tagging-spike.md,
+    # Gates; rewriting those floats would let this step demand equal pages
+    # again (drop B4A_ALLOW_PAGE_DIFF and make the chapter loop fail).
+    # The tagged PDFs are put back afterwards.
+    - name: B4a tagged vs untagged
+      run: |
+        start=$(date +%s)
+        chapters=$(sed 's/^- //; s/\r$//' order.yaml)
+        mkdir -p tagged
+        cp main.pdf tagged/main.pdf
+        for c in $chapters; do mkdir -p "tagged/$(dirname "$c")"; cp "$c.pdf" "tagged/$c.pdf"; done
+        make TAGGED=0 pdf
+        bash _scripts/check_tex_logs.sh
+        cp main.pdf main-untagged.pdf
+        status=0
+        B4A_ALLOW_PAGE_DIFF=1 bash _scripts/compare_pdf_text.sh main.pdf tagged/main.pdf b4a/main \
+          | tee -a "$GITHUB_STEP_SUMMARY" || status=1
+        for c in $chapters; do
+          if ! bash _scripts/compare_pdf_text.sh "$c.pdf" "tagged/$c.pdf" "b4a/$(basename "$c")" > b4a-chapter.txt; then
+            echo "B4a (not blocking) differs for $c.pdf:" | tee -a "$GITHUB_STEP_SUMMARY"; cat b4a-chapter.txt
+          fi
+        done
+        cp tagged/main.pdf main.pdf
+        for c in $chapters; do cp "tagged/$c.pdf" "$c.pdf"; done
+        echo "B4a (untagged build and comparisons): $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
+        exit $status
+
+    - name: Upload PDFs, logs and reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pdf
+        path: |
+          main.pdf
+          main-untagged.pdf
+          */*.pdf
+          main_tagged.log
+          main_wrapper.log
+          */*.pdf.log
+          b2.json
+          b4a/
+        if-no-files-found: warn
+
+  # B3: veraPDF against PDF/UA-2. The figure and alt-text rules block; the
+  # full report (every rule) is uploaded for review. Not in the container
+  # above because veraPDF runs as its own Docker image.
+  pdf-verapdf:
+    needs: pdf
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Download the PDF
+      uses: actions/download-artifact@v4
+      with:
+        name: pdf
+
+    - name: B3 veraPDF PDF/UA-2
+      run: |
+        # verapdf/cli:v1.30.2, pinned in the script.
+        bash _scripts/check_verapdf.sh main.pdf verapdf-ua2.json --strict-figures \
+          | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the veraPDF report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: verapdf-report
+        path: verapdf-ua2.json
+        if-no-files-found: warn
+
   # Part C of issue #238: a cheap, stdlib-only lint that checks every content
   # figure's \includegraphics carries non-empty alt text. It only reads the
   # .tex sources, so it doesn't need install.sh's TeX/pandoc toolchain and
-  # runs in seconds -- keep it in its own job, not the matrix above, so it
-  # isn't held hostage by (or holding hostage) the 9 minute PDF build.
+  # runs in seconds -- keep it in its own job, so it isn't held hostage by
+  # (or holding hostage) the much longer PDF build.
   alt-text-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 5

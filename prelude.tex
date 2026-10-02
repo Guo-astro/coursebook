@@ -1,6 +1,7 @@
-\usepackage[T1]{fontenc}
+% Fonts, and the PDF-only layout that works with PDF tagging (chapter and
+% section heads, hidelinks, the proof clash): see cs341book.sty.
+\RequirePackage{cs341book}
 \usepackage{microtype}
-\usepackage[charter]{mathdesign}
 \usepackage{geometry}
  \geometry{
  a4paper,
@@ -14,7 +15,6 @@
 
 \usepackage{fancyhdr}
 \usepackage[usenames,dvipsnames]{xcolor}
-\usepackage{mdframed}
 \usepackage{setspace}
 \usepackage{mfirstuc}
 \usepackage{graphicx,changepage}
@@ -32,13 +32,9 @@
 % Chapter by chapter bib
 \usepackage{chapterbib}
 
-% Set up source code highlighting
-\usepackage{listings}
-\lstset{
-basicstyle=\ttfamily,
-columns=flexible,
-breaklines=true
-}
+% Code blocks (lstlisting, minted, \lstinputlisting) on the kernel's
+% verbatim, which PDF tagging supports: see cs341code.sty.
+\RequirePackage{cs341code}
 
 \definecolor{greencomments}{rgb}{0,0.5,0}
 \definecolor{redstrings}{rgb}{0.9,0,0}
@@ -62,22 +58,8 @@ breaklines=true
 % Has to be name shadecolor
 \definecolor{shadecolor}{HTML}{EEEEEE}
 \usepackage{framed}
-\newcommand{\CodeSymbol}[1]{\textcolor{red}{#1}\bfseries}
 
-\lstset{aboveskip=20pt,
-belowskip=20pt,
-xleftmargin=1.5cm,
-xrightmargin=1.5cm,
-framexrightmargin=.5em,
-framexleftmargin=.5em,
-frame=bt,
-framextopmargin=5pt,
-framexbottommargin=5pt,
-backgroundcolor=\color{shadecolor},
-rulecolor=\color{shadecolor},}
 
-% Define syntax highlighting style
-\usepackage{listings}
 % set up quotes
 \usepackage{epigraph}
 
@@ -92,8 +74,7 @@ rulecolor=\color{shadecolor},}
   \end{\textflush}\end{minipage}}
 \makeatother
 
-% Define titles and chapter
-\usepackage[Bjornstrup]{fncychap}
+% Chapter heads: see cs341book.sty
 \singlespacing
 \title{\vspace{-15mm}\fontsize{24pt}{10pt}\selectfont\textbf{CS341 System Programming Coursebook}}
 \date{}
@@ -107,7 +88,6 @@ rulecolor=\color{shadecolor},}
 % For pictures
 \newenvironment{proof}{\begin{shaded*}\paragraph{Proof:}}{\hfill$\square$\end{shaded*}}
 \newenvironment{tableau}{\begin{shaded*}\begin{longtable}}{\end{longtable}\end{shaded*}}
-\usepackage{wrapfig}
 
 
 %  100/90/10/77 
@@ -117,17 +97,8 @@ rulecolor=\color{shadecolor},}
 %-----------------------------------------------------------------
 \usepackage{csquotes}
 
-% this is a terrible hack, but pandoc sucks
-% we have to call any
-\lstnewenvironment{minted}[1]
-  {\noindent\minipage{\linewidth}\medskip 
-   \lstset{basicstyle=\ttfamily\footnotesize,frame=single,language=#1}}
-  {\endminipage}
 
 \usepackage{float}
 
-% title spacing
-
-\usepackage[compact]{titlesec}
 
 \renewcommand{\baselinestretch}{1.15}

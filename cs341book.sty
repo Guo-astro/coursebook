@@ -1,0 +1,177 @@
+% cs341book.sty -- PDF-only layout that works with PDF tagging (issue
+% #238, Part B). It replaces three packages the LaTeX tagging code does
+% not support, keeping their look:
+%   fncychap [Bjornstrup]  chapter heads (grey bars, big grey number)
+%   titlesec               the section sizes and spacing in main.tex
+% and settles two clashes with the tagging code (proof, hidelinks).
+% pandoc never reads this file (it ignores \usepackage), so none of this
+% reaches the EPUB or the wiki. prelude.tex loads it first, with
+% \RequirePackage (pandoc does parse a local .sty named in \usepackage).
+%
+% With \DocumentMetadata (the default `make pdf`) chapter heads go through
+% latex-lab's heading templates, which tag them as /H1; without it (`make
+% pdf TAGGED=0`) through the class's \@makechapterhead. Both draw the
+% same boxes with the same macros below.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{cs341book}[2026/09/14 v1.0 CS341 coursebook layout]
+
+% ---------------------------------------------------------------------
+% Fonts. The book was set in Bitstream Charter from mathdesign (Type 1,
+% T1 encoding). XCharter is the same design as OpenType, with math to
+% match (XCharter-Math). Two reasons to switch: veraPDF's PDF/UA check
+% fails the embedded Type 1 Charter (rule 8.4.5.6-1, glyph widths), and
+% the T1 Charter has no ’ “ ” under LuaLaTeX, so every such character in
+% the sources was silently dropped from the PDF (24 in background alone).
+% Sans and mono stay Latin Modern (fontspec's default, the same design
+% as the T1 fonts before). A code character Latin Modern Mono lacks falls
+% back to DejaVu Sans Mono rather than to an empty .notdef glyph (which
+% PDF/UA forbids): one block shows the replacement character U+FFFD.
+\RequirePackage{fontspec}
+\RequirePackage{unicode-math}
+\directlua{luaotfload.add_fallback("cs341mono", {"file:DejaVuSansMono.ttf:mode=node;"})}
+% fontspec's Latin Modern Mono has no bold, so \textbf{\texttt{..}} (in
+% every \keyword) came out regular; the book set it in LM Mono Light Bold
+% (lmtk10), whose OpenType version is named here.
+\setmonofont{Latin Modern Mono}[
+  BoldFont=lmmonolt10-bold.otf, BoldItalicFont=lmmonolt10-boldoblique.otf,
+  BoldSlantedFont=lmmonolt10-boldoblique.otf,
+  RawFeature={fallback=cs341mono}]
+\setmainfont{XCharter}[
+  Extension=.otf, UprightFont=*-Roman, BoldFont=*-Bold,
+  ItalicFont=*-Italic, BoldItalicFont=*-BoldItalic,
+  SlantedFont=*-Slanted, BoldSlantedFont=*-BoldSlanted]
+% AUTHORS.md (\lstinputlisting, cs341code.sty) has a few CJK names.
+% XCharter has no CJK, so they vanished from the PDF (as they did with
+% mathdesign), and PDF/UA fails on the .notdef glyph. This family falls
+% back to HaranoAji Mincho (in TeX Live), which has them all. Only that
+% list uses it: a fallback font is loaded with every instance of the font
+% that names it, and the CJK font is large. (Look it up by font name: the
+% file: form fails to load.)
+\directlua{luaotfload.add_fallback("cs341cjk", {"HaranoAjiMincho-Regular:mode=node;"})}
+\newfontfamily\cs@cjkfamily{XCharter}[
+  Extension=.otf, UprightFont=*-Roman, BoldFont=*-Bold,
+  ItalicFont=*-Italic, BoldItalicFont=*-BoldItalic,
+  RawFeature={fallback=cs341cjk}]
+\def\cscodeinputfont{\cs@cjkfamily}
+\setmathfont{XCharter-Math.otf}
+% The chapter number: TeX Gyre Chorus, the OpenType version of the Zapf
+% Chancery (pzc) that fncychap's Bjornstrup style used.
+\newfontfamily\cs@chapnumfamily{texgyrechorus-mediumitalic.otf}
+% mathdesign (like amssymb) had \square, which the proof box in
+% prelude.tex ends with; unicode-math calls U+25A1 \mdlgwhtsquare.
+\AtBeginDocument{\providecommand\square{\mdlgwhtsquare}}
+
+% ---------------------------------------------------------------------
+% Links: with \DocumentMetadata the class option hidelinks no longer
+% reaches hyperref (links got coloured boxes), so set it here. The title
+% is the window title (PDF/UA: DisplayDocTitle). prelude.tex loads this
+% package before hyperref.
+\AddToHook{package/hyperref/after}{%
+  \hypersetup{hidelinks,
+    pdftitle={CS341 System Programming Coursebook},
+    pdfauthor={B. Venkatesh, L. Angrave, et al.},
+    pdfdisplaydoctitle=true}}
+
+% ---------------------------------------------------------------------
+% proof: latex-lab's block module defines a proof environment, and then
+% prelude.tex's \newenvironment{proof} (the shaded box) fails with
+% "already defined". prelude.tex has to keep that plain \newenvironment,
+% because pandoc expands it for the EPUB (pandoc does not expand
+% \NewDocumentEnvironment or \DeclareDocumentEnvironment); so remove
+% latex-lab's definition here, before prelude.tex makes its own.
+\let\proof\@undefined
+\let\endproof\@undefined
+
+% ---------------------------------------------------------------------
+% Chapter heads, as fncychap's Bjornstrup style drew them: a grey bar
+% 40pt high with the chapter number in 76pt grey Zapf Chancery hanging off
+% its right end, then the title flush right in a grey box. Only boxes and
+% rules, no \parbox: in a tagged PDF a \parbox would put a Div and a
+% paragraph inside the /H1, which PDF/UA-2 forbids. (fncychap used
+% \parbox; the geometry here is the same.)
+\newlength\cs@chapnumwd
+\newcommand\cs@chapnumfont{\fontsize{76}{80}\cs@chapnumfamily}
+\newcommand\cs@chapnumber[1]{%
+  \settowidth\cs@chapnumwd{\cs@chapnumfont #1}%
+  \addtolength\cs@chapnumwd{-10pt}%
+  % A box exactly \textwidth wide, so the line is never overfull: the
+  % number still hangs 10pt past the bar's right end, as with fncychap,
+  % but TeX never breaks the line before the bar (in a tagged build the
+  % heading starts with a link target, and a break there added a line).
+  \makebox[\textwidth][l]{%
+    {\color[gray]{.85}\rule{\textwidth}{40pt}}%
+    \kern-\cs@chapnumwd\raise20pt\hbox{\color[gray]{.5}\cs@chapnumfont #1}}}
+\newcommand\cs@chaptitle[1]{%
+  \nointerlineskip\vskip-1ex
+  {\fboxsep10pt\noindent
+   \colorbox[gray]{.85}{\hbox to\dimexpr\textwidth-20pt\relax
+     {\hfill\Large\sffamily\bfseries #1}}\par}}
+
+% Tagged (latex-lab's heading templates are loaded) or not.
+\newif\ifcs@headtemplates
+\IfInstanceExistsTF{heading}{chapter}{\cs@headtemplatestrue}{\cs@headtemplatesfalse}
+\ifcs@headtemplates
+  % Tagged: latex-lab's chapter heading instance with our drawing. No
+  % prefix, so there is no "Chapter" word, as with fncychap.
+  \DeclareInstance{heading}{chapter}{display}
+  {
+    , name           = chapter
+    , level          = 0
+    , placement      = top
+    , after-penalty-vspace = 50pt
+    , after-vspace   = 40pt
+    , prefix         = \NoValue
+    , number-format  = \cs@chapnumber{\thechapter}
+    , heading-decls  = \raggedright \parindent0pt
+    , title-decls    =
+    , headformat-instance = cs341chapter
+    , mark-cmd       = \chaptermark {#1}
+    , contents-extra = \addtocontents{lof}{\protect\addvspace{10\p@}}
+                       \addtocontents{lot}{\protect\addvspace{10\p@}}
+  }
+  \DeclareInstance{headformat}{cs341chapter}{display}
+  {
+    , heading-indent   = 0pt
+    , number-title-sep = 0pt
+    , title-format     = \cs@chaptitle{#1}
+  }
+\else
+  \def\@makechapterhead#1{%
+    \vspace*{50\p@}%
+    {\parindent\z@\raggedright\normalfont
+     \ifnum\c@secnumdepth>\m@ne\if@mainmatter
+       \cs@chapnumber{\thechapter}\par\nobreak
+     \fi\fi
+     \interlinepenalty\@M
+     \cs@chaptitle{#1}\nobreak
+     \vskip 40\p@}}
+\fi
+
+% ---------------------------------------------------------------------
+% \tightlist (pandoc's idiom; prelude.tex \providecommand's it and 36 lists
+% use it) zeroes \itemsep and \parskip after the list has begun. The
+% kernel's list (untagged) has already set the space above the first item
+% by then, but latex-lab's list (tagged) still uses \parskip for it, so
+% each such list started 4pt higher in the tagged build: two pages over the
+% book (B4a). Zero \parskip only once the first item has begun, so both
+% builds keep the space above the first item, as the book always had. This
+% definition comes first, so prelude.tex's \providecommand does nothing
+% here, and pandoc (which never reads this file) keeps prelude.tex's.
+\newcommand\tightlist{\setlength\itemsep{0pt}%
+  \AddToHookNext{para/begin}{\setlength\parskip{0pt}}}
+
+% ---------------------------------------------------------------------
+% Section heads: the sizes and spacing main.tex used to set with titlesec
+% (\titleformat*, \titlespacing*), as plain \@startsection calls, which
+% latex-lab tags as /H2../H6. A negative space above means the paragraph
+% after is not indented, like \titlespacing*.
+\renewcommand\section{\@startsection{section}{1}{\z@}%
+  {-5.5ex \@plus -1ex \@minus -.2ex}{4.3ex \@plus .2ex}{\normalfont\LARGE\bfseries}}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+  {-5.5ex \@plus -1ex \@minus -.2ex}{2.3ex \@plus .2ex}{\normalfont\Large\bfseries}}
+\renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}%
+  {-5.5ex \@plus -1ex \@minus -.2ex}{2.3ex \@plus .2ex}{\normalfont\large\bfseries}}
+\renewcommand\paragraph{\@startsection{paragraph}{4}{\z@}%
+  {3.25ex \@plus 1ex \@minus .2ex}{-1em}{\normalfont\large\bfseries}}
+\renewcommand\subparagraph{\@startsection{subparagraph}{5}{\parindent}%
+  {3.25ex \@plus 1ex \@minus .2ex}{-1em}{\normalfont\large\bfseries}}

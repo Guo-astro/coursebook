@@ -694,8 +694,8 @@ answer = 42
 pthread_cond_signal(cv);
 \end{lstlisting}
 
-\begin{center}
 \begin{table}[h]
+  \centering
 \caption{Signaling without Mutex}
 \begin{tabular}{|c|c|}
   Thread 1 & Thread 2 \\ \hline
@@ -705,7 +705,6 @@ pthread_cond_signal(cv);
   pthread\_cond\_wait(cv)
 \end{tabular}
 \end{table}
-\end{center}
 The problem here is that a programmer expects the signal to wake up the waiting thread.
 Since instructions are allowed to be interleaved without a mutex, this causes an interleaving that is confusing to application designers.
 Note that technically the API of the condition variable is satisfied.
@@ -1096,8 +1095,8 @@ We will be evaluating this in the context of a random process timing, meaning th
 
 Just a refresher, here are the terms.
 
-\begin{center}
 \begin{table}[h]
+  \centering
 \caption{Scheduling Variables}
 \begin{tabular}{|c|c|}
   Concept & Meaning \\ \hline
@@ -1107,12 +1106,11 @@ Just a refresher, here are the terms.
   Run time & How long does the process take to run if there is no preemption
 \end{tabular}
 \end{table}
-\end{center}
 
 And here are the measures we are trying to optimize.
 
-\begin{center}
 \begin{table}[h]
+  \centering
 \caption{Scheduling Measures of Efficiency}
 \begin{tabular}{|c|c|}
   Measure & Formula \\ \hline
@@ -1121,7 +1119,6 @@ And here are the measures we are trying to optimize.
   Wait time & End time minus Arrival time minus Run time \\
 \end{tabular}
 \end{table}
-\end{center}
 
 Different use cases will be discussed after.
 Let $T$ be the maximum amount of time that a process runs; every process finishes in a finite amount of time.

@@ -146,9 +146,38 @@ class ScanTests(unittest.TestCase):
 
     def test_safe_escapes_do_not_warn(self):
         write(self.root, "ch/ch.tex", (
-            "\\includegraphics[alt={c\\_str and a '\\textbackslash 0' terminator.}]"
+            "\\includegraphics[alt={c\\_str is 100\\% of it \\& more\\ldots}]"
             "{ch/safe.eps}\n"
         ))
+        results = alt_lint.scan(self.root)
+        self.assertEqual(results[0]["_warnings"], [])
+
+    def test_escapes_that_leak_into_pdf_alt_warn(self):
+        # Tagging copies these into /Alt as typed ("\\textbackslash 0").
+        for esc in ("\\textbackslash", "\\textasciitilde", "\\textasciicircum"):
+            with self.subTest(esc=esc):
+                write(self.root, "ch/ch.tex", (
+                    "\\includegraphics[alt={the terminating '" + esc + " 0'.}]"
+                    "{ch/leak.eps}\n"
+                ))
+                results = alt_lint.scan(self.root)
+                self.assertTrue(any(esc in w for w in results[0]["_warnings"]),
+                                results[0]["_warnings"])
+
+    def test_tex_quotes_dashes_and_math_warn(self):
+        for alt, what in (("a ``quoted'' word", "TeX quotes"),
+                          ("pages 1--2", "TeX dash"),
+                          ("costs $n^2$", "inline math")):
+            with self.subTest(alt=alt):
+                write(self.root, "ch/ch.tex",
+                      "\\includegraphics[alt={" + alt + "}]{ch/lit.eps}\n")
+                results = alt_lint.scan(self.root)
+                self.assertTrue(any(what in w for w in results[0]["_warnings"]),
+                                results[0]["_warnings"])
+
+    def test_escaped_dollar_is_not_math(self):
+        write(self.root, "ch/ch.tex",
+              "\\includegraphics[alt={costs \\$5}]{ch/dollar.eps}\n")
         results = alt_lint.scan(self.root)
         self.assertEqual(results[0]["_warnings"], [])
 

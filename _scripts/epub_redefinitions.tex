@@ -1,0 +1,13 @@
+% EPUB-only macro overrides. The Makefile's epub rule passes this file to
+% pandoc BEFORE main.tex. pandoc keeps the first definition of a macro and
+% ignores later \newcommand's for it ("Macro already defined, ignoring"),
+% so these win over prelude.tex's, while the PDF (which never reads this
+% file) keeps prelude.tex's look.
+%
+% prelude.tex's \keyword wraps its argument in \smash, which pandoc's
+% LaTeX reader drops together with its content, so every \keyword{...} in
+% the EPUB came out empty: "executed (), where should reserve the memory?"
+% for "(\keyword{malloc(2048)}), where should \keyword{malloc} reserve".
+% That happened under pandoc 2.7 too. The wiki gets the same override
+% from github_redefinitions.tex.
+\newcommand{\keyword}[1]{\texttt{#1}}

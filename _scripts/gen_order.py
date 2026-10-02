@@ -13,7 +13,7 @@ def main(args):
     file_name = args.name
     # Yaml load will load lists in order by default
     reorder = yaml.load(open(file_name, 'r'), Loader=yaml.SafeLoader)
-    templ = '\include{{{}}}'
+    templ = r'\include{{{}}}'
 
     for file in reorder:
         render = templ.format(file)

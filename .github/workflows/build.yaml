@@ -4,6 +4,9 @@ on:
   pull_request:
     branches:
       - master
+  # So the pandoc-compatibility job below can be asked for by hand on a
+  # branch, without having to touch a file just to make it run.
+  workflow_dispatch:
 
 # A PR build has no side effects, so superseding one is always safe:
 # when someone pushes a fixup commit, kill the run for the old commit
@@ -34,7 +37,8 @@ jobs:
 
     # Python 3.7 has no build for ubuntu-24.04 or 26.04, so setup-python
     # could not find it. 3.11 has builds for 22.04, 24.04 and 26.04, and
-    # works with panflute 1.12.5, which still targets pandoc 2.7's AST.
+    # works with panflute 2.3.1, which matches the pandoc 3.10.2 that
+    # install.sh pins (see the comment there before changing either).
     - name: Setup python
       uses: actions/setup-python@v5
       with:
@@ -49,6 +53,216 @@ jobs:
     - name: Build coursebook
       run: |
         bash _scripts/script.sh
+
+  # Does this PR touch anything that could change what pandoc makes of the
+  # book? If not, the pandoc-compatibility job below is skipped.
+  #
+  # Why a gate job rather than `on: pull_request: paths:`: that key filters
+  # the whole workflow, and the build and lint jobs must run on every PR.
+  # A gate job keeps the decision next to the job it guards, with no
+  # third-party action.
+  pandoc-compatibility-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      needed: ${{ steps.changed.outputs.needed }}
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        # Both sides of the comparison, so git diff can see the base.
+        fetch-depth: 0
+
+    - name: Did anything pandoc-shaped change?
+      id: changed
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        if [ -z "$BASE_SHA" ]; then
+          echo "needed=true" >> "$GITHUB_OUTPUT"   # workflow_dispatch
+          exit 0
+        fi
+        # The pandoc version, the panflute pin, the filters, and the macro
+        # files that change how pandoc parses every page: gen_wiki.py puts
+        # prelude.tex and github_redefinitions.tex in front of each chapter,
+        # and main.tex (the file the AST capture reads) \input's prelude.tex,
+        # so a change to \keyword or to the listings setup there reshapes the
+        # whole comparison. A *chapter's* prose cannot change pandoc's
+        # behaviour, only its input, so chapters are deliberately not here.
+        changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+          requirements.txt \
+          Makefile \
+          main.tex \
+          prelude.tex \
+          github_redefinitions.tex \
+          _scripts/install.sh \
+          _scripts/alt_text.py \
+          _scripts/pandoc_epub_filter.py \
+          _scripts/pandoc_wiki_filter.py \
+          _scripts/pandoc_header_filter.py \
+          _scripts/gen_wiki.py \
+          _scripts/gen_order.py \
+          _scripts/epub_metadata.yaml \
+          _scripts/epub_redefinitions.tex \
+          _scripts/epub_cover_alt.py \
+          _scripts/compare_pandoc_ast.py)
+        if [ -n "$changed" ]; then
+          echo "Pandoc-relevant files changed:"; echo "$changed"
+          echo "needed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "No pandoc-relevant file changed; skipping the baseline build."
+          echo "needed=false" >> "$GITHUB_OUTPUT"
+        fi
+
+  # Gates A0 and A4 of issue #238: build the book with the pandoc the base
+  # commit pins AND with the one this branch pins, keep both as artifacts,
+  # and report what changed between the two ASTs.
+  #
+  # This is the expensive job -- two toolchains and two full EPUB and wiki
+  # builds -- and it only tells you anything when the pandoc path itself
+  # changes, so it is guarded by the gate above (or asked for by hand with
+  # workflow_dispatch). Running it on every PR forever would pay for a
+  # pandoc 2.7 baseline build on PRs that only fix a typo.
+  #
+  # A0 says the baseline must be captured BEFORE the upgrade merges, which
+  # is exactly what checking out the PR's base commit does.
+  pandoc-compatibility:
+    needs: pandoc-compatibility-gate
+    if: needs.pandoc-compatibility-gate.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Checkout the base commit (the A0 baseline)
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+        path: baseline
+
+    - name: Checkout this branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        path: current
+
+    - name: Setup python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    # The baseline's own pinned pandoc and panflute, in a venv of their
+    # own, read from the baseline checkout so this job needs no copy of the
+    # old version numbers: whatever that commit pinned is what it gets.
+    - name: Install the baseline toolchain
+      working-directory: baseline
+      run: |
+        python -m venv "$RUNNER_TEMP/baseline-venv"
+        "$RUNNER_TEMP/baseline-venv/bin/pip" install -q -r requirements.txt
+        # The version that commit pins. Take the PANDOC_VERSION assignment
+        # first, and only then a .deb URL on a line that is not a comment:
+        # install.sh carries the rollback URL of the *previous* pandoc in a
+        # comment above the real pin, so matching any URL would quietly make
+        # every baseline that older version and report its whole delta as if
+        # this PR had caused it.
+        version=$(sed -n 's/^[[:space:]]*PANDOC_VERSION=\([^[:space:]#]*\).*/\1/p' \
+          _scripts/install.sh | head -1)
+        if [ -z "$version" ]; then
+          version=$(grep -v '^[[:space:]]*#' _scripts/install.sh \
+            | sed -n 's|.*releases/download/\([0-9][^/]*\)/pandoc-.*|\1|p' | head -1)
+        fi
+        if [ -z "$version" ]; then
+          echo "could not read the baseline pandoc version from _scripts/install.sh" >&2
+          exit 1
+        fi
+        echo "baseline pandoc: $version" | tee -a "$GITHUB_STEP_SUMMARY"
+        curl --fail --location --retry 3 -o "$RUNNER_TEMP/pandoc-base.deb" \
+          "https://github.com/jgm/pandoc/releases/download/$version/pandoc-$version-1-amd64.deb"
+        # Against the checksum that commit recorded, when it has one.
+        sha=$(sed -n 's/^[[:space:]]*PANDOC_SHA256=\([0-9a-f]*\).*/\1/p' \
+          _scripts/install.sh | head -1)
+        if [ -n "$sha" ]; then
+          echo "$sha  $RUNNER_TEMP/pandoc-base.deb" | sha256sum -c -
+        fi
+        dpkg-deb -x "$RUNNER_TEMP/pandoc-base.deb" "$RUNNER_TEMP/pandoc-base"
+
+    - name: Capture the baseline AST, EPUB and wiki
+      working-directory: baseline
+      env:
+        BUILD_FOCUS: EPUB
+      run: |
+        export PATH="$RUNNER_TEMP/pandoc-base/usr/bin:$RUNNER_TEMP/baseline-venv/bin:$PATH"
+        pandoc --version | head -1
+        python3 _scripts/gen_order.py order.yaml > order.tex
+        # The AST A4 compares: main.tex alone, no filters, no citeproc.
+        pandoc -f latex -t json main.tex -o baseline-ast.json
+        # The outputs themselves, for a human to look at next to the new
+        # ones. Not blocking: the point of this job is the comparison, and
+        # an old toolchain that no longer installs must not fail the PR. A
+        # failure goes in the step summary, though, so an empty artifact is
+        # explained rather than just missing. (gen_wiki.py sets
+        # LINK_CACHE_FILE_NAME itself, to ~/cache, so both sides share that
+        # cache; it holds only link-check timestamps.)
+        make epub \
+          || echo "baseline EPUB build failed; no baseline EPUB artifact" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+        mkdir -p _wiki
+        python3 _scripts/gen_wiki.py order.yaml _wiki \
+          || echo "baseline wiki build failed; no baseline wiki artifact" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the baseline artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: pandoc-baseline
+        path: |
+          baseline/baseline-ast.json
+          baseline/main.epub
+          baseline/_wiki/**
+        if-no-files-found: warn
+        retention-days: 90
+
+    - name: Install this branch's toolchain
+      working-directory: current
+      env:
+        BUILD_FOCUS: EPUB
+      run: bash _scripts/install.sh
+
+    - name: Build and check this branch's EPUB and wiki
+      working-directory: current
+      run: |
+        python3 _scripts/gen_order.py order.yaml > order.tex
+        pandoc -f latex -t json main.tex -o current-ast.json
+        BUILD_FOCUS=EPUB bash _scripts/script.sh
+        BUILD_FOCUS=WIKI bash _scripts/script.sh
+
+    - name: A4, compare the two ASTs
+      working-directory: current
+      run: |
+        python3 _scripts/compare_pandoc_ast.py \
+          ../baseline/baseline-ast.json current-ast.json \
+          --wiki-dir _wiki --report-file a4-report.md \
+          --old-label 'base commit' --new-label 'this branch' \
+          | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload this branch's artifacts and the A4 report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pandoc-current
+        path: |
+          current/current-ast.json
+          current/a4-report.md
+          current/main.epub
+          current/_wiki/**
+        if-no-files-found: warn
+        retention-days: 90
 
   # Part C of issue #238: a cheap, stdlib-only lint that checks every content
   # figure's \includegraphics carries non-empty alt text. It only reads the

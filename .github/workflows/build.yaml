@@ -11,8 +11,12 @@ on:
 # A PR build has no side effects, so superseding one is always safe:
 # when someone pushes a fixup commit, kill the run for the old commit
 # rather than paying for a PDF build nobody will look at.
+#
+# The event name is part of the group so a hand-started run (which can be
+# asked for on master) cannot cancel the run for a push or a pull request
+# on the same ref: those two share github.ref but are not the same work.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -91,10 +95,24 @@ jobs:
         # so a change to \keyword or to the listings setup there reshapes the
         # whole comparison. A *chapter's* prose cannot change pandoc's
         # behaviour, only its input, so chapters are deliberately not here.
-        changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+        # Compare against the merge base, not the base branch tip: on a
+        # branch that is behind master, BASE_SHA..HEAD_SHA also contains
+        # every other PR merged since, so an unrelated merge would decide
+        # this gate (and, below, land in the A4 table as if this branch
+        # had caused it).
+        base=$(git merge-base "$BASE_SHA" "$HEAD_SHA") || base="$BASE_SHA"
+        # main_wrapper.tex, title.tex, glossary.tex and order.yaml are
+        # here with the macro files: main.tex \input's glossary.tex and
+        # order.tex (generated from order.yaml), so each one reshapes the
+        # AST that A4 compares, rather than only supplying prose.
+        changed=$(git diff --name-only "$base" "$HEAD_SHA" -- \
           requirements.txt \
           Makefile \
           main.tex \
+          main_wrapper.tex \
+          title.tex \
+          glossary.tex \
+          order.yaml \
           prelude.tex \
           github_redefinitions.tex \
           _scripts/install.sh \
@@ -145,12 +163,33 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
         path: baseline
+        # Full history so the step below can find the merge base.
+        fetch-depth: 0
 
     - name: Checkout this branch
       uses: actions/checkout@v4
       with:
         ref: ${{ github.event.pull_request.head.sha || github.sha }}
         path: current
+
+    # The baseline must be what this branch actually diverged from. The
+    # base branch *tip* also carries every other PR merged since, so on a
+    # branch that is behind master their changes would show up in the A4
+    # table as if this one had made them.
+    - name: Move the baseline to the merge base
+      working-directory: baseline
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ]; then
+          echo "not a pull request; the baseline stays at the default branch"
+          exit 0
+        fi
+        git fetch --no-tags origin "$HEAD_SHA"
+        base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+        echo "baseline commit: $base" | tee -a "$GITHUB_STEP_SUMMARY"
+        git checkout --detach "$base"
 
     - name: Setup python
       uses: actions/setup-python@v5
@@ -198,6 +237,13 @@ jobs:
         BUILD_FOCUS: EPUB
       run: |
         export PATH="$RUNNER_TEMP/pandoc-base/usr/bin:$RUNNER_TEMP/baseline-venv/bin:$PATH"
+        # gen_wiki.py keeps its link-check cache under $HOME and trusts an
+        # entry for 30 days, so with one HOME the baseline (which runs
+        # first) fills the cache and the current side's link checking is
+        # just a replay of what the old toolchain decided minutes earlier.
+        # A HOME of its own keeps the two sides' link checks independent.
+        export HOME="$RUNNER_TEMP/baseline-home"
+        mkdir -p "$HOME"
         pandoc --version | head -1
         python3 _scripts/gen_order.py order.yaml > order.tex
         # The AST A4 compares: main.tex alone, no filters, no citeproc.
@@ -206,9 +252,7 @@ jobs:
         # ones. Not blocking: the point of this job is the comparison, and
         # an old toolchain that no longer installs must not fail the PR. A
         # failure goes in the step summary, though, so an empty artifact is
-        # explained rather than just missing. (gen_wiki.py sets
-        # LINK_CACHE_FILE_NAME itself, to ~/cache, so both sides share that
-        # cache; it holds only link-check timestamps.)
+        # explained rather than just missing.
         make epub \
           || echo "baseline EPUB build failed; no baseline EPUB artifact" \
             | tee -a "$GITHUB_STEP_SUMMARY"

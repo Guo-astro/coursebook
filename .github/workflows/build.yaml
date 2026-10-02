@@ -49,3 +49,29 @@ jobs:
     - name: Build coursebook
       run: |
         bash _scripts/script.sh
+
+  # Part C of issue #238: a cheap, stdlib-only lint that checks every content
+  # figure's \includegraphics carries non-empty alt text. It only reads the
+  # .tex sources, so it doesn't need install.sh's TeX/pandoc toolchain and
+  # runs in seconds -- keep it in its own job, not the matrix above, so it
+  # isn't held hostage by (or holding hostage) the 9 minute PDF build.
+  alt-text-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Setup python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Run alt-text lint unit tests
+      run: |
+        python3 -m unittest _scripts.test_alt_lint -v
+
+    - name: Run alt-text lint
+      run: |
+        python3 _scripts/alt_lint.py

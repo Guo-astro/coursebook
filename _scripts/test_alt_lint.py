@@ -280,6 +280,120 @@ class ScanTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             alt_lint.scan(self.root)
 
+    def test_unterminated_option_list_is_reported(self):
+        # The truncated `[` swallows the alt= key, so skipping this in
+        # silence (as the scanner used to) hides the figure from the gate.
+        write(self.root, "ch/ch.tex", (
+            "\\includegraphics[width=1cm,alt={A drawing.}{ch/a.eps}\n"
+        ))
+        results = alt_lint.scan(self.root)
+        self.assertEqual(len(results), 1)
+        self.assertIn("unterminated [...] option list", results[0]["_malformed"])
+        self.assertEqual(results[0]["path"], "")
+
+    def test_missing_path_group_is_reported(self):
+        write(self.root, "ch/ch.tex", "\\includegraphics[width=1cm]\n\\par\n")
+        results = alt_lint.scan(self.root)
+        self.assertEqual(len(results), 1)
+        self.assertIn("no {path} group", results[0]["_malformed"])
+
+    def test_unterminated_path_group_is_reported(self):
+        write(self.root, "ch/ch.tex", "\\includegraphics[alt={ok}]{ch/a.eps\n")
+        results = alt_lint.scan(self.root)
+        self.assertEqual(len(results), 1)
+        self.assertIn("unterminated {path} group", results[0]["_malformed"])
+
+    def test_title_macro_hacks_are_not_malformed(self):
+        # title.tex mentions \includegraphics without calling it; those are
+        # not includes at all and must not be reported as malformed.
+        write(self.root, "title.tex", (
+            "\\let\\oldgraphics\\includegraphics\n"
+            "\\renewcommand{\\includegraphics}[2][]{}\n"
+            "\\let\\includegraphics\\oldgraphics\n"
+        ))
+        results = alt_lint.scan(self.root)
+        self.assertEqual(results, [])
+
+    def test_unbraced_macro_definition_is_not_malformed(self):
+        # \newcommand\includegraphics[2][]{}: the [2] is the argument count,
+        # not an option list, so this definition is not a call.
+        for definition in ("\\newcommand\\includegraphics[2][]{}",
+                           "\\renewcommand\\includegraphics[2][]{}",
+                           "\\providecommand\\includegraphics[2][]{}",
+                           "\\def\\includegraphics[2]{}"):
+            with self.subTest(definition=definition):
+                write(self.root, "ch/ch.tex", definition + "\n")
+                self.assertEqual(alt_lint.scan(self.root), [])
+
+    def test_star_after_space_is_scanned(self):
+        # LaTeX's \@ifstar skips spaces, so this is a legal starred call and
+        # must not slip past the gate unscanned.
+        write(self.root, "ch/ch.tex",
+              "\\includegraphics *[alt={A drawing.}]{ch/a.eps}\n")
+        results = alt_lint.scan(self.root)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["path"], "ch/a.eps")
+        self.assertEqual(results[0]["alt"], "A drawing.")
+        self.assertIsNone(results[0]["_malformed"])
+
+    def test_order_yaml_entry_with_comment_or_quotes_or_suffix(self):
+        # All three are valid YAML for the same chapter. Reading them
+        # literally used to invent a chapter name no file matched, which
+        # then failed every real figure in that chapter as unreachable.
+        for entry in ("- ch/ch # the intro chapter\n", '- "ch/ch"\n',
+                      "- 'ch/ch'\n", "- ch/ch.tex\n"):
+            with self.subTest(entry=entry):
+                write(self.root, "order.yaml", entry)
+                write(self.root, "ch/ch.tex",
+                      "\\includegraphics[alt={ok}]{ch/a.eps}\n")
+                results = alt_lint.scan(self.root)
+                self.assertEqual(len(results), 1)
+                self.assertIsNone(results[0]["_unreachable"])
+
+    def test_missing_chapter_file_does_not_orphan_real_ones(self):
+        write(self.root, "order.yaml", "- ch/gone\n- ch/ch\n")
+        write(self.root, "ch/ch.tex", "\\includegraphics[alt={ok}]{ch/a.eps}\n")
+        results = alt_lint.scan(self.root)
+        self.assertEqual(len(results), 1)
+        self.assertIsNone(results[0]["_unreachable"])
+
+    def test_file_reached_only_through_main_tex_is_reachable(self):
+        # main.tex \include's title.tex, which no chapter reaches; a figure
+        # there is still in the PDF and the EPUB.
+        write(self.root, "order.yaml", "- ch/ch\n")
+        write(self.root, "main.tex", "\\include{extra}\n\\input{order.tex}\n")
+        write(self.root, "ch/ch.tex", "\\includegraphics[alt={ok}]{ch/a.eps}\n")
+        write(self.root, "extra.tex", "\\includegraphics[alt={logo}]{ch/b.eps}\n")
+        results = alt_lint.scan(self.root)
+        by_file = {r["file"]: r for r in results}
+        self.assertIsNone(by_file["extra.tex"]["_unreachable"])
+        self.assertIsNone(by_file["ch/ch.tex"]["_unreachable"])
+
+    def test_unreachable_figure_is_reported(self):
+        write(self.root, "order.yaml", "- ch/ch\n")
+        write(self.root, "ch/ch.tex", "\\includegraphics[alt={in the book}]{ch/a.eps}\n")
+        write(self.root, "orphan/orphan.tex", "\\includegraphics[alt={orphan}]{orphan/b.eps}\n")
+        results = alt_lint.scan(self.root)
+        by_file = {r["file"]: r for r in results}
+        self.assertIsNone(by_file["ch/ch.tex"]["_unreachable"])
+        self.assertIn("order.yaml", by_file["orphan/orphan.tex"]["_unreachable"])
+
+    def test_figure_reached_through_input_chain_is_reachable(self):
+        write(self.root, "order.yaml", "- ch/ch\n")
+        write(self.root, "ch/ch.tex", "\\input{ch/sub.tex}\n")
+        write(self.root, "ch/sub.tex", "\\includegraphics[alt={deep}]{ch/a.eps}\n")
+        results = alt_lint.scan(self.root)
+        self.assertEqual(len(results), 1)
+        self.assertIsNone(results[0]["_unreachable"])
+
+    def test_no_order_yaml_skips_reachability(self):
+        # Without order.yaml there is nothing to be reachable from, so the
+        # check has to stay quiet rather than fail every figure.
+        write(self.root, "ch/ch.tex", "\\includegraphics[alt={ok}]{ch/a.eps}\n")
+        results = alt_lint.scan(self.root)
+        self.assertEqual(len(results), 1)
+        self.assertIsNone(results[0]["_unreachable"])
+
 
 class CliTests(unittest.TestCase):
     def setUp(self):
@@ -314,6 +428,30 @@ class CliTests(unittest.TestCase):
         proc = self.run_cli()
         self.assertEqual(proc.returncode, 1)
         self.assertIn("missing alt text", proc.stderr)
+
+    def test_fails_on_malformed_include(self):
+        write(self.root, "ch/ch.tex", "\\includegraphics[alt={x}{ch/a.eps}\n")
+        proc = self.run_cli()
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("malformed", proc.stderr)
+
+    def test_fails_on_unreachable_figure(self):
+        write(self.root, "order.yaml", "- ch/ch\n")
+        write(self.root, "ch/ch.tex", "\\includegraphics[alt={ok}]{ch/a.eps}\n")
+        write(self.root, "orphan/orphan.tex", "\\includegraphics[alt={orphan}]{orphan/b.eps}\n")
+        proc = self.run_cli()
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("order.yaml", proc.stderr)
+
+    def test_malformed_include_absent_from_json(self):
+        write(self.root, "ch/ch.tex", (
+            "\\includegraphics[alt={good}]{ch/a.eps}\n"
+            "\\includegraphics[alt={bad}{ch/b.eps}\n"
+        ))
+        proc = self.run_cli("--json")
+        self.assertEqual(proc.returncode, 1)
+        data = json.loads(proc.stdout)
+        self.assertEqual([d["path"] for d in data], ["ch/a.eps"])
 
 
 if __name__ == "__main__":

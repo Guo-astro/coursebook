@@ -15,7 +15,10 @@ Stable interface (other parts of #238 import/parse this):
     where order.yaml is available, else sorted by path. Each element:
         {"file": relpath, "line": int, "path": <graphic path as written>,
          "alt": <raw alt source text>, "caption": <raw caption text or null>}
-    Allow-listed items (see below) are excluded from this list.
+    Allow-listed items (see below) are excluded from this list, as are
+    malformed includes: there is no path to report for them, and for a
+    truncated option list not even the alt text (they still fail the run,
+    so checking the exit status is enough).
 
     Without --json, a short human summary (count, pass/fail) is printed.
 
@@ -25,8 +28,20 @@ Stable interface (other parts of #238 import/parse this):
     `--json` prints (plus internal bookkeeping fields prefixed with `_`,
     which callers should ignore).
 
-Exit codes: 0 if every content figure has non-empty alt text, 1 otherwise.
-Warnings (see WARN checks below) never affect the exit code.
+Exit codes: 0 if every content figure has non-empty alt text, is written as
+a well-formed `\\includegraphics`, and sits in a file the book actually
+builds; 1 otherwise. Warnings (see WARN checks below) never affect the exit
+code.
+
+The three failures, in the order they were added:
+  * missing/empty alt text -- the original invariant;
+  * a malformed include: an unterminated `[...]` option list, an
+    unterminated `{path}` group, or options followed by no `{path}` at all.
+    These used to be skipped in silence, which hid the figure from this gate
+    rather than failing it;
+  * a figure in a .tex file nothing the book builds reaches, so no output
+    contains it. The entry points are main.tex (which \\include's title.tex
+    and \\input's prelude.tex and glossary.tex) and order.yaml's chapters.
 """
 
 from __future__ import annotations
@@ -282,34 +297,72 @@ def iter_tex_files(root: str) -> Iterable[str]:
 
 
 def find_includegraphics(text: str):
-    """Yield (match_start_char_index, opts_text, path_text, opts_start, path_start)
-    for each `\\includegraphics[...]{...}` in text (brace/bracket-aware).
+    """Yield (match_start_char_index, opts_text, path_text, problem) for each
+    `\\includegraphics[...]{...}` in text (brace/bracket-aware).
     Also matches the starred `\\includegraphics*` form (graphicx allows the
     star to suppress clipping-to-bounding-box; it doesn't change the
-    alt-text contract)."""
-    for m in re.finditer(r"\\includegraphics(?!\w)\*?", text):
+    alt-text contract).
+
+    `problem` is None for a well-formed include. For a malformed one it is a
+    short description of what is wrong, and `path` is "": the scanner used to
+    skip these silently, which hid a figure from the gate instead of failing
+    it (a truncated `[` option list swallows the alt= key, so the figure
+    would simply never be checked).
+
+    Two forms are deliberately not includes at all, and are skipped without
+    being reported:
+      * a definition or alias of the macro rather than a call to it
+        (`\\let\\includegraphics\\oldgraphics`,
+        `\\renewcommand{\\includegraphics}[2][]{}` and the unbraced
+        `\\newcommand\\includegraphics[2][]{}`) -- title.tex does this for
+        the epub titlepage, and the `[2]` of such a definition is an arity,
+        not an option list;
+      * a bare `\\includegraphics` followed by neither an option list nor a
+        path group.
+    A call that opens `[` or `{` and never closes it, or that passes options
+    and then no path at all, is a real defect."""
+    for m in re.finditer(r"\\includegraphics(?![A-Za-z@])", text):
+        # \newcommand\includegraphics[2][]{} defines the macro; the [2] is
+        # its argument count. Reading that as a call reports the definition
+        # as a malformed include and fails the build on valid LaTeX.
+        if _DEFINING_COMMAND_RE.search(text[max(0, m.start() - 60):m.start()]):
+            continue
         i = m.end()
         n = len(text)
         # Skip whitespace/newlines between the macro and its arguments --
         # LaTeX allows `\includegraphics\n[opts]{path}`.
         while i < n and text[i].isspace():
             i += 1
+        # The starred form. LaTeX's \@ifstar skips spaces before the star, so
+        # `\includegraphics *[opts]{path}` is a legal call; matching the star
+        # only when it is adjacent let that form through unscanned.
+        if i < n and text[i] == "*":
+            i += 1
+            while i < n and text[i].isspace():
+                i += 1
         opts = ""
+        had_opts = False
         if i < n and text[i] == "[":
             close = find_matching_bracket(text, i)
             if close == -1:
-                continue  # malformed; not our problem to fix
+                yield m.start(), "", "", "unterminated [...] option list"
+                continue
+            had_opts = True
             opts = text[i + 1:close]
             i = close + 1
             while i < n and text[i].isspace():
                 i += 1
         if i >= n or text[i] != "{":
-            continue  # no path group; malformed \includegraphics
+            if had_opts:
+                yield m.start(), opts, "", "no {path} group after the options"
+            # Otherwise it is a mention, not a call: see the docstring.
+            continue
         close = find_matching_brace(text, i)
         if close == -1:
+            yield m.start(), opts, "", "unterminated {path} group"
             continue
         path = text[i + 1:close]
-        yield m.start(), opts, path
+        yield m.start(), opts, path, None
 
 
 def find_captions(text: str, start: int, end: int) -> list[tuple[int, str]]:
@@ -377,6 +430,18 @@ def line_number_at(text: str, pos: int) -> int:
     return text.count("\n", 0, pos) + 1
 
 
+# A command that defines or aliases the next macro instead of calling it.
+# Anchored at the end, so it only matches immediately before the macro.
+_DEFINING_COMMAND_RE = re.compile(
+    r"\\(?:newcommand|renewcommand|providecommand|DeclareRobustCommand"
+    r"|newrobustcmd|renewrobustcmd)\*?\s*\{?\s*$"
+    r"|\\(?:def|let|gdef|edef|xdef)\s*\{?\s*$"
+)
+
+# The other entry point into the book, besides order.yaml's chapters.
+BUILD_ROOT_TEX = "main.tex"
+
+
 def _expand_book_order(root: str, relfile: str, visited: set, out: list) -> None:
     """DFS-expand `relfile`'s own \\input/\\include targets, depth first,
     in the order they appear, so a chapter file like introc/introc.tex
@@ -387,13 +452,17 @@ def _expand_book_order(root: str, relfile: str, visited: set, out: list) -> None
     if relfile in visited:
         return
     visited.add(relfile)
-    out.append(relfile)
     abspath = os.path.join(root, relfile)
     try:
         with open(abspath, encoding="utf-8") as f:
             raw = f.read()
     except OSError:
+        # A listed file that is not there contributes nothing. Recording it
+        # anyway would put a name in the order, and in the reachable set,
+        # that no real file matches -- so one mis-read order.yaml entry
+        # would make every real figure in that chapter look unreachable.
         return
+    out.append(relfile)
     text = strip_comments(raw)
     for m in re.finditer(r"\\(?:input|include)\{([^}]*)\}", text):
         target = m.group(1).strip()
@@ -410,15 +479,32 @@ def load_book_order(root: str) -> list[str]:
     chapter's own \\input/\\include chain (see _expand_book_order) so
     files pulled in with \\input still land in book order rather than
     falling back to a sorted-path tiebreak. Returns the list of `.tex`
-    file relpaths in book order."""
+    file relpaths in book order.
+
+    This reads order.yaml by hand to keep the lint stdlib-only, so it has to
+    tolerate the YAML the real file is allowed to contain: a trailing
+    `# comment`, a quoted entry, and an entry that already ends in `.tex`.
+    Taking any of those literally would invent a chapter name no file
+    matches, which the reachability check would then blame on the real
+    files."""
     order_path = os.path.join(root, "order.yaml")
     chapter_roots = []
     try:
         with open(order_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if line.startswith("- "):
-                    chapter_roots.append(line[2:].strip() + ".tex")
+                if not line.startswith("- "):
+                    continue
+                entry = line[2:].strip()
+                if "#" in entry:
+                    entry = entry.split("#", 1)[0].strip()
+                if len(entry) >= 2 and entry[0] == entry[-1] and entry[0] in "\"'":
+                    entry = entry[1:-1].strip()
+                if not entry:
+                    continue
+                if not entry.endswith(".tex"):
+                    entry += ".tex"
+                chapter_roots.append(entry)
     except OSError:
         return []
     visited: set = set()
@@ -428,13 +514,33 @@ def load_book_order(root: str) -> list[str]:
     return out
 
 
+def load_reachable(root: str, order: list[str]) -> set[str]:
+    """Every .tex file the book pulls in, from both of its entry points.
+
+    order.yaml's chapters are one. main.tex is the other: it \\include's
+    title.tex and \\input's prelude.tex and glossary.tex, which no chapter
+    reaches. A figure in one of those really is in the PDF and the EPUB, so
+    counting only order.yaml would report a figure readers can see as
+    orphaned.
+
+    main.tex also \\input's the generated order.tex, which a clean checkout
+    does not have; that is why order.yaml's chapters are expanded as well
+    instead of relying on main.tex alone."""
+    visited: set = set()
+    out: list = []
+    if os.path.isfile(os.path.join(root, BUILD_ROOT_TEX)):
+        _expand_book_order(root, BUILD_ROOT_TEX, visited, out)
+    return set(order) | set(out)
+
+
 def scan(root: str) -> list[dict]:
     """Scan every .tex file under `root` for \\includegraphics calls.
     Returns a list of dicts for content figures only (allow-listed
     entries, like the title-page duck, are excluded), each with:
         file, line, path, alt, caption
-    plus internal fields `_missing_alt` (bool) and `_warnings` (list[str])
-    that --json output does not print but the CLI/tests use.
+    plus internal fields `_missing_alt` (bool), `_malformed` (str or None),
+    `_unreachable` (str or None) and `_warnings` (list[str]) that --json
+    output does not print but the CLI/tests use.
     Order: book order from order.yaml when available, falling back to
     sorted file path, then by line number within a file.
     """
@@ -447,12 +553,29 @@ def scan(root: str) -> list[dict]:
             raw = f.read()
         text = strip_comments(raw)
 
-        for start, opts, path in find_includegraphics(text):
+        for start, opts, path, problem in find_includegraphics(text):
+            line = line_number_at(text, start)
+            if problem is not None:
+                # A malformed include is a failure, not a figure: we cannot
+                # know its path or its alt text, so it gets no caption or
+                # warning checks and never matches the allow-list.
+                results.append({
+                    "file": relfile,
+                    "line": line,
+                    "path": "",
+                    "alt": "",
+                    "caption": None,
+                    "_missing_alt": False,
+                    "_malformed": problem,
+                    "_unreachable": None,
+                    "_warnings": [],
+                })
+                continue
+
             path = path.strip()
             if relfile == ALLOWLIST_FILE and path in ALLOWLIST_PATHS:
                 continue
 
-            line = line_number_at(text, start)
             alt = extract_key(opts, "alt")
             caption = find_enclosing_caption(text, start)
 
@@ -486,6 +609,8 @@ def scan(root: str) -> list[dict]:
                 "alt": alt if alt is not None else "",
                 "caption": caption,
                 "_missing_alt": missing_alt,
+                "_malformed": None,
+                "_unreachable": None,
                 "_warnings": warnings,
             })
 
@@ -500,6 +625,22 @@ def scan(root: str) -> list[dict]:
     order = load_book_order(root)
     if order:
         order_index = {f: i for i, f in enumerate(order)}
+
+        # Reachability. A figure in a .tex file that nothing the book builds
+        # reaches (directly or through an \input/\include chain) is in no
+        # output at all. Its alt text can pass this lint forever while no
+        # reader ever sees the figure, and a figure meant to be in the book
+        # is silently orphaned instead. Only checked once order.yaml has
+        # yielded at least one real chapter file; without that there is
+        # nothing to be reachable from.
+        reachable = load_reachable(root, order)
+        for item in results:
+            if item["file"] not in reachable:
+                item["_unreachable"] = (
+                    f"{item['file']}:{item['line']}: neither {BUILD_ROOT_TEX} nor "
+                    f"any chapter in order.yaml reaches this file, so the figure "
+                    f"is in no output"
+                )
 
         def sort_key(item):
             return (order_index.get(item["file"], len(order)), item["file"], item["line"])
@@ -531,22 +672,35 @@ def main(argv=None) -> int:
     for r in failed:
         print(f"FAIL {r['file']}:{r['line']}: missing alt text for \\includegraphics{{{r['path']}}}", file=sys.stderr)
 
+    malformed = [r for r in results if r["_malformed"]]
+    for r in malformed:
+        print(f"FAIL {r['file']}:{r['line']}: malformed \\includegraphics: {r['_malformed']}",
+              file=sys.stderr)
+
+    unreachable = [r for r in results if r["_unreachable"]]
+    for r in unreachable:
+        print(f"FAIL {r['_unreachable']}", file=sys.stderr)
+
     for r in results:
         for w in r["_warnings"]:
             print(f"WARN {w}", file=sys.stderr)
 
     if args.json:
+        # Only well-formed figures: a malformed include has no path or alt
+        # text to report. It still fails the run, so a consumer that checks
+        # the exit status (CI does) never reads a list that quietly omits it.
         public = [
             {"file": r["file"], "line": r["line"], "path": r["path"], "alt": r["alt"], "caption": r["caption"]}
-            for r in results
+            for r in results if not r["_malformed"]
         ]
         print(json.dumps(public, indent=2))
     else:
         total_warnings = sum(len(r["_warnings"]) for r in results)
-        print(f"alt_lint: {len(results)} content figure(s) scanned, "
-              f"{len(failed)} missing alt text, {total_warnings} warning(s).")
+        print(f"alt_lint: {len(results) - len(malformed)} content figure(s) scanned, "
+              f"{len(failed)} missing alt text, {len(malformed)} malformed, "
+              f"{len(unreachable)} unreachable, {total_warnings} warning(s).")
 
-    return 1 if failed else 0
+    return 1 if (failed or malformed or unreachable) else 0
 
 
 if __name__ == "__main__":

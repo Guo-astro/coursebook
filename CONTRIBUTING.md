@@ -192,9 +192,14 @@ To make sure the book has a consistent tone among authors, we'll use the general
 Every content figure's `\includegraphics` must carry a non-empty `alt={...}`
 key describing what the figure shows (see issue #238). CI runs
 `_scripts/alt_lint.py`, which fails the build if any figure is missing alt
-text, and warns (without failing) if an alt text is just the caption
-repeated, a generic word like "diagram", or contains a LaTeX macro that
-won't render sensibly outside a formatted document.
+text, if an `\includegraphics` is malformed (an unterminated `[...]` option
+list, an unterminated `{path}` group, or options with no `{path}` at all), or
+if a figure sits in a `.tex` file that nothing the book builds reaches --
+neither `main.tex` nor any chapter in `order.yaml` -- which is an orphaned
+figure no reader ever sees.
+It warns (without failing) if an alt text is just the caption repeated, a
+generic word like "diagram", or contains a LaTeX macro that won't render
+sensibly outside a formatted document.
 
 That lint only proves alt text *arrived* -- it can't tell whether the words
 you wrote are actually correct or useful. So **any PR that adds or changes
@@ -211,10 +216,8 @@ python3 _scripts/alt_lint.py --json | jq '.[] | select(.file == "malloc/malloc.t
 (swap in the files your PR actually touched, or drop the `select` to list
 everything). If `jq` isn't installed, `python3 _scripts/alt_lint.py --json`
 alone dumps every content figure's file, line, path, alt text and caption
-as JSON to filter by hand.
-
-(swap in the files your PR actually changed), and paste the figures plus
-this list into the PR description.
+as JSON to filter by hand. Paste the figures plus this list into the PR
+description.
 
 # Code Style
 
